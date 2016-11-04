@@ -456,7 +456,7 @@ def calc_genome_structure(ncc_file_path, pdb_file_path, general_calc_params, ann
 
   for stage, particle_size in enumerate(particle_sizes):
  
-      print "Running structure caculation stage %d (%d kb)" % (stage+1, (particle_size/1e3))
+      print("Running structure caculation stage %d (%d kb)" % (stage+1, (particle_size/1e3)))
  
       # Can remove large violations (noise contacts inconsistent with structure)
       # once we have a resonable resolution structure

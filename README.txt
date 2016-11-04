@@ -52,16 +52,15 @@ calculation more robust.
 Python Module Requirements
 ---------------------------
 
-This software uses Python version 2 (all code will be migrated to Python 3 in
-due course) and requires that the Numpy and Cython packages are installed and
+This software uses Python version 2 or 3 and requires that the Numpy and Cython packages are installed and
 available to the Python version that runs NucDynamics.
 
 These modules are available in bundled Python packages like Anaconda or Canopy,
 in most Linux distributions' package managers or can be installed on most
 UNIX-like systems using pip:
 
-  pip2 install numpy
-  pip2 install cython
+  pip install numpy
+  pip install cython
 
 
 Installation
@@ -163,3 +162,25 @@ optional arguments:
                         particle velocities. Default: 0.001
 
 For further help on running this program please email tjs23@cam.ac.uk
+
+
+Jupyter Script
+--------------
+
+In addition to the command-line tool a Jupyter notebook for Python 3 is provided
+to illustrate how nuc_dynamics can be imported used within Python
+scripts. Jupyter can be installed using:
+
+  pip install jupyter
+
+And from the directory containing nuc_dynamics the notebook can be started with:
+
+  jupyter notebook
+
+This notebook is has only been tested under Python version 3 and to run requires
+the Cython code to be compiled (see Installation section above), to generate the
+dyn_util.so file, and for all the modules to either be in the same directory or on
+the PYTHONPATH.
+
+ 
+
