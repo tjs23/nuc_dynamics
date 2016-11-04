@@ -4,10 +4,10 @@ NucDynamics
 NucDynamics is a Python/Cython program for the calculation of genome structures
 from single-cell Hi-C chromosome contact data using a simulated annealing
 particle dynamics protocol. This software takes NCC format contact data (as
-output by NucProcess) and creates PDB (ProteinDataBank) format files. The
-result of the structure calculation is output in PDB format so that it may be
-viewed in molecular graphics software such as PyMol. Further output formats will
-be supported in the near future.
+output by NucProcess) and creates PDB (ProteinDataBank) format files. The result
+of the structure calculation is output in PDB format so that it may be viewed in
+molecular graphics software such as PyMol. Further output formats will be
+supported in the near future.
 
 To run NucDynamics issue the 'nuc_dynamics' command line followed by the
 name/location of an input NCC format contact file. Various options may be
@@ -52,8 +52,9 @@ calculation more robust.
 Python Module Requirements
 ---------------------------
 
-This software uses Python version 2 or 3 and requires that the Numpy and Cython packages are installed and
-available to the Python version that runs NucDynamics.
+This software uses Python version 2 or 3 and requires that the Numpy and Cython
+packages are installed and available to the Python version that runs
+NucDynamics.
 
 These modules are available in bundled Python packages like Anaconda or Canopy,
 in most Linux distributions' package managers or can be installed on most
@@ -168,8 +169,8 @@ Jupyter Script
 --------------
 
 In addition to the command-line tool a Jupyter notebook for Python 3 is provided
-to illustrate how nuc_dynamics can be imported used within Python
-scripts. Jupyter can be installed using:
+to illustrate how nuc_dynamics can be imported used within Python scripts.
+Jupyter can be installed using:
 
   pip install jupyter
 
@@ -179,8 +180,8 @@ And from the directory containing nuc_dynamics the notebook can be started with:
 
 This notebook is has only been tested under Python version 3 and to run requires
 the Cython code to be compiled (see Installation section above), to generate the
-dyn_util.so file, and for all the modules to either be in the same directory or on
-the PYTHONPATH.
+dyn_util.so file, and for all the modules to either be in the same directory or
+on the PYTHONPATH.
 
  
 
