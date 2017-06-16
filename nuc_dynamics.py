@@ -1,7 +1,85 @@
 # Python functions for NucDynamics
-
+import sys
 import numpy as np
-import dyn_util
+import multiprocessing
+import traceback
+
+PROG_NAME = 'nuc_dynamics'
+DESCRIPTION = 'Single-cell Hi-C genome and chromosome structure calculation module for Nuc3D and NucTools'
+
+N3D = 'n3d'
+PDB = 'pdb'
+FORMATS = [N3D, PDB]
+MAX_CORES = multiprocessing.cpu_count()
+
+def warn(msg, prefix='WARNING'):
+
+  print('%8s : %s' % (prefix, msg))
+
+
+def critical(msg, prefix='ABORT'):
+
+  print('%8s : %s' % (prefix, msg))
+  sys.exit(0)
+  
+  
+def _parallel_func_wrapper(queue, target_func, proc_data, common_args):
+  
+  for t, data_item in proc_data:
+    result = target_func(data_item, *common_args)
+    
+    if queue:
+      queue.put((t, result))
+    
+    elif isinstance(result, Exception):
+      raise(result)
+
+
+def parallel_split_job(target_func, split_data, common_args, num_cpu=MAX_CORES, collect_output=True):
+  
+  num_tasks   = len(split_data)
+  num_process = min(num_cpu, num_tasks)
+  
+  processes   = []
+  
+  if collect_output:
+    queue = multiprocessing.Queue() # Queue will collect parallel process output
+  
+  else:
+    queue = None
+    
+  for p in range(num_process):
+    # Task IDs and data for each task
+    # Each process can have multiple tasks if there are more tasks than processes/cpus
+    proc_data = [(t, data_item) for t, data_item in enumerate(split_data) if t % num_cpu == p]
+    args = (queue, target_func, proc_data, common_args)
+
+    proc = multiprocessing.Process(target=_parallel_func_wrapper, args=args)
+    processes.append(proc)
+  
+  for proc in processes:
+    proc.start()
+  
+  if queue:
+    results = [None] * num_tasks
+    
+    for i in range(num_tasks):
+      t, result = queue.get() # Asynchronous fetch output: whichever process completes a task first
+      
+      if isinstance(result, Exception):
+        print('\n* * * * C/Cython code may need to be recompiled. Try running "python setup_cython.py build_ext --inplace" * * * *\n')
+        raise(result)
+        
+      results[t] = result
+ 
+    queue.close()
+ 
+    return results
+  
+  else:
+    for proc in processes: # Asynchromous wait and no output captured
+      proc.join()
+
 
 def load_ncc_file(file_path):
   """Load chromosome and contact data from NCC format file, as output from NucProcess"""
@@ -81,6 +159,31 @@ def load_ncc_file(file_path):
   return chromosomes, chromo_limits, contact_dict
 
 
+def export_n3d_coords(file_path, coords_dict, seq_pos_dict):
+  
+  file_obj = open(file_path, 'w')
+  write = file_obj.write
+  
+  for chromo in seq_pos_dict:
+    chromo_coords = coords_dict[chromo]
+    chromo_seq_pos = seq_pos_dict[chromo]
+    
+    num_models = len(chromo_coords)
+    num_coords = len(chromo_seq_pos)
+    
+    line = '%s\t%d\t%d\n' % (chromo, num_coords, num_models)
+    write(line)
+    
+    for j in range(num_coords):
+      data = chromo_coords[:,j].ravel().tolist()
+      data = '\t'.join('%.8f' % d for d in  data)
+      
+      line = '%d\t%s\n' % (chromo_seq_pos[j], data)
+      write(line)
+
+  file_obj.close()
+
+
 def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale=1.0, extended=True):
   """
   Write chromosome particle coordinates as a PDB format file
@@ -102,6 +205,22 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
   write = file_obj.write
   
   chromosomes = list(seq_pos_dict.keys())
+  
+  sort_chromos = []
+  for chromo in chromosomes:
+    if chromo[:3] == 'chr':
+      key = chromo[3:]
+    else:
+      key = chromo
+    
+    if key.isdigit():
+      key = '%03d' % int(key)
+    
+    sort_chromos.append((key, chromo))
+  
+  sort_chromos.sort()
+  sort_chromos = [x[1] for x in sort_chromos]
+  
   num_models = len(coords_dict[chromosomes[0]])
   title = 'NucDynamics genome structure export'
   
@@ -127,18 +246,9 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
     c = 0
     j = 1
     seqPrev = None
-    for chromo in seq_pos_dict:
-      
-      if chromo.isdigit():
-        idx = int(chromo) - 1
-        chain_code = chr(ord('A')+idx)
-      
-      elif len(chromo) == 1:
-        chain_code = chromo.upper()
-        
-      else:
-        idx = chromosomes.index(chromo)
-        chain_code = chr(ord('a')+idx)
+    
+    for k, chromo in enumerate(sort_chromos):
+      chain_code = chr(ord('a')+k)            
       
       tlc = chromo
       while len(tlc) < 2:
@@ -319,11 +429,54 @@ def unpack_chromo_coords(coords, chromosomes, seq_pos_dict):
     j += span
  
   return coords_dict
+
+
+def anneal_model(model_data, anneal_schedule, masses, radii, restraint_indices, restraint_dists,
+                 ambiguity, temp, time_step, dyn_steps, repulse, n_rep_max):
+
+  import gc
   
+  m, model_coords = model_data
+  
+  # Anneal one model in parallel
+  
+  time_taken = 0.0
+  
+  if m == 0:
+    printInterval = max(1, dyn_steps/2)
+  
+  else:
+    printInterval = 0
+  
+  print('  starting model %d' % m)
+  
+  for temp, repulse in anneal_schedule:
+    gc.collect() # Try to free some memory
+    
+    # Update coordinates for this temp
+    
+    try:  
+      dt, n_rep_max = dyn_util.runDynamics(model_coords, masses, radii, restraint_indices, restraint_dists,
+                                           ambiguity, temp, time_step, dyn_steps, repulse, nRepMax=n_rep_max,
+                                           printInterval=printInterval)
+    
+    except Exception as err:
+      return err
+ 
+    n_rep_max = np.int32(1.05 * n_rep_max) # Base on num in prev cycle, plus a small overhead
+    time_taken += dt
+  
+  # Center
+  model_coords -= model_coords.mean(axis=0)
+
+  print('  done model %d' % m)
+  
+  return model_coords
+ 
   
 def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
                   general_calc_params, anneal_params,
-                  prev_seq_pos_dict=None, start_coords=None):
+                  prev_seq_pos_dict=None, start_coords=None, num_cpu=MAX_CORES):
     """
     Use chromosome contact data to generate distance restraints and then
     apply a simulated annealing protocul to generate/refine coordinates.
@@ -333,7 +486,6 @@ def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
     
     from numpy import random
     from math import log, exp, atan, pi
-    import gc
     
     random.seed(general_calc_params['random_seed'])
     particle_size = np.int32(particle_size)
@@ -408,36 +560,24 @@ def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
     dyn_steps = anneal_params['dynamics_steps']
     time_step = anneal_params['time_step']
        
-    # Update coordinates in the annealing schedule
-    time_taken = 0.0
+    # Update coordinates in the annealing schedule which is applied to each model in parallel
+    common_args = [anneal_schedule, masses, radii, restraint_indices, restraint_dists,
+                   ambiguity, temp, time_step, dyn_steps, repulse, n_rep_max]
     
-    for m in range(num_models): # For each repeat calculation
-      model_coords = coords[m]
-        
-      for temp, repulse in anneal_schedule:
-        gc.collect() # Try to free some memory
-        
-        # Update coordinates for this temp
-        dt, n_rep_max = dyn_util.runDynamics(model_coords, masses, radii, restraint_indices, restraint_dists,
-                                    ambiguity, temp, time_step, dyn_steps, repulse, nRepMax=n_rep_max)
-      
-        n_rep_max = np.int32(1.05 * n_rep_max) # Base on num in prev cycle, plus an overhead
-        time_taken += dt
-  
-      # Center
-      model_coords -= model_coords.mean(axis=0)
-      
-      # Update
-      coords[m] = model_coords
+    task_data = [(m, coords[m]) for m in range(len(coords))]
     
+    coords = parallel_split_job(anneal_model, task_data, common_args, num_cpu, collect_output=True)
+    coords = np.array(coords)
+   
     # Convert from single coord array to dict keyed by chromosome
     coords_dict = unpack_chromo_coords(coords, chromosomes, seq_pos_dict)
     
     return coords_dict, seq_pos_dict
 
 
-def calc_genome_structure(ncc_file_path, pdb_file_path, general_calc_params, anneal_params,
-                          particle_sizes, num_models=5, isolation_threshold=2e6):
+def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, anneal_params,
+                          particle_sizes, num_models=5, isolation_threshold=2e6,
+                          out_format=N3D, num_cpu=MAX_CORES):
 
   from time import time
 
@@ -450,7 +590,7 @@ def calc_genome_structure(ncc_file_path, pdb_file_path, general_calc_params, ann
   # Initial coords will be random
   start_coords = None
 
-  # Record partile positions from previous stages
+  # Record particle positions from previous stages
   # so that coordinates can be interpolated to higher resolution
   prev_seq_pos = None
 
@@ -459,7 +599,7 @@ def calc_genome_structure(ncc_file_path, pdb_file_path, general_calc_params, ann
       print("Running structure caculation stage %d (%d kb)" % (stage+1, (particle_size/1e3)))
  
       # Can remove large violations (noise contacts inconsistent with structure)
-      # once we have a resonable resolution structure
+      # once we have a reasonable resolution structure
       
       if stage > 0:
         if particle_size < 0.5e6:
@@ -471,24 +611,28 @@ def calc_genome_structure(ncc_file_path, pdb_file_path, general_calc_params, ann
  
       coords_dict, particle_seq_pos = anneal_genome(chromosomes, contact_dict, num_models, particle_size,
                                                     general_calc_params, anneal_params,
-                                                    prev_seq_pos, start_coords)
+                                                    prev_seq_pos, start_coords, num_cpu)
  
       # Next stage based on previous stage's 3D coords
-      # and thier respective seq. positions
+      # and their respective seq. positions
       start_coords = coords_dict
       prev_seq_pos = particle_seq_pos
 
-  # Save final coords as PDB format file
-  export_pdb_coords(pdb_file_path, coords_dict, particle_seq_pos, particle_size)
-  print('Saved structure file to: %s' % pdb_file_path)
-
-
-PROG_NAME = 'nuc_dynamics'
-DESCRIPTION = 'Single-cell Hi-C genome and chromosome structure calculation module for Nuc3D and NucTools'
-
-def warn(msg, prefix='WARNING'):
-
-  print('%8s : %s' % (prefix, msg))
+  # Save final coords as N3D or PDB format file
+  
+  if out_format == PDB:
+    if not out_file_path.endswith(PDB):
+      out_file_path = '%s.%s' % (out_file_path, PDB)
+  
+    export_pdb_coords(out_file_path, coords_dict, particle_seq_pos, particle_size)
+ 
+  else:
+    if not out_file_path.endswith(N3D):
+      out_file_path = '%s.%s' % (out_file_path, N3D)
+      
+    export_n3d_coords(out_file_path, coords_dict, particle_seq_pos)
+    
+  print('Saved structure file to: %s' % out_file_path)
 
 
 def test_imports(gui=False):
@@ -517,6 +661,9 @@ def test_imports(gui=False):
     
     try:
       import dyn_util
+      warn('NucDynamics C/Cython code compiled. Please re-run command.')
+      sys.exit(0)
+      
     except ImportError as err:
       critical = True
       warn('Utility C/Cython code compilation/import failed')   
@@ -559,11 +706,13 @@ def demo_calc_genome_structure():
   # (at both ends) to be considered supported, i.e. not isolated
   isolation_threshold=2e6
   
-  calc_genome_structure(ncc_file_path, pdb_file_path, general_calc_params, anneal_params,
-                        particle_sizes, num_models, isolation_threshold)
+  calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
+                        particle_sizes, num_models, isolation_threshold, out_format='pdb')
 
     
 test_imports()
+
+import dyn_util
 
 if __name__ == '__main__':
   
@@ -580,14 +729,20 @@ if __name__ == '__main__':
   arg_parse.add_argument('ncc_path', nargs=1, metavar='NCC_FILE',
                          help='Input NCC format file containing single-cell Hi-C contact data, e.g. use the demo data at example_chromo_data/Cell_1_contacts.ncc')
 
-  arg_parse.add_argument('-o', metavar='PDB_FILE',
-                         help='Optional name of PDB format output file for 3D coordinates. If not set this will be auto-generated from the input file name')
+  arg_parse.add_argument('-o', metavar='OUT_FILE',
+                         help='Optional name of output file for 3D coordinates in N3D or PDB format (see -f option). If not set this will be auto-generated from the input file name')
 
   arg_parse.add_argument('-m', default=1, metavar='NUM_MODELS',
                          type=int, help='Number of alternative conformations to generate from repeat calculations with different random starting coordinates: Default: 1')
 
+  arg_parse.add_argument('-f', metavar='OUT_FORMAT', default=N3D,
+                         help='File format for output 3D coordinate file. Default: "%s". Also available: "%s"' % (N3D, PDB))
+
   arg_parse.add_argument('-s', nargs='+', default=[8.0,4.0,2.0,0.4,0.2,0.1], metavar='Mb_SIZE', type=float,
                          help='One or more sizes (Mb) for the hierarchical structure calculation protocol (will be used in descending order). Default: 8.0 4.0 2.0 0.4 0.2 0.1')
+
+  arg_parse.add_argument('-cpu', metavar='NUM_CPU', type=int, default=MAX_CORES,
+                         help='Number of parallel CPU cores for calculating different coordinate models. Limited by the number of models (-m) but otherwise defaults to all available CPU cores (%d)' % MAX_CORES)
 
   arg_parse.add_argument('-iso', default=2.0, metavar='Mb_SIZE', type=float,
                          help='Contacts must be near another, within this (Mb) separation threshold (at both ends) to be considered supported: Default 2.0')
@@ -634,15 +789,16 @@ if __name__ == '__main__':
   
   save_path = args['o']
   if save_path is None:
-    save_path = os.path.splitext(ncc_file_path)[0] + '.pdb'
+    save_path = os.path.splitext(ncc_file_path)[0]
     
   particle_sizes = args['s']
   particle_sizes = sorted([x * 1e6 for x in particle_sizes if x > 0], reverse=True)
   if not particle_sizes:
-    warn('No positive particle sizes (Mb) specified', 'ABORT')
-    sys.exit(0)
+    critical('No positive particle sizes (Mb) specified')
   
   num_models = args['m']
+  out_format = args['f'].lower()
+  num_cpu    = args['cpu'] or 1
   dist_power_law = args['pow']
   contact_dist_lower = args['lower']
   contact_dist_upper = args['upper']
@@ -656,6 +812,9 @@ if __name__ == '__main__':
   dynamics_steps = args['dyns']
   time_step = args['time_step']
   isolation_threshold = args['iso']
+  
+  if out_format not in FORMATS:
+    critical('Output file format must be one of: %s' % ', '.join(FORMATS))
   
   for val, name, sign in ((num_models,         'Number of conformational models', '+'),
                           (dist_power_law,     'Distance power law', '-0'),
@@ -675,26 +834,21 @@ if __name__ == '__main__':
     if '+' in sign:
       if '0' in sign:
         if val < 0.0:
-          warn('%s must be non-negative' % name, 'ABORT')
-          sys.exit(0)
+          critical('%s must be non-negative' % name)
       
       else:
         if val <= 0.0:
-          warn('%s must be positive' % name, 'ABORT')
-          sys.exit(0)
+          warcriticaln('%s must be positive' % name)
       
     elif '-' in sign:  
       if '0' in sign:
         if val > 0.0:
-          warn('%s must be non-positive' % name, 'ABORT')
-          sys.exit(0)
+          critical('%s must be non-positive' % name)
       
       else:
         if val >= 0.0:
-          warn('%s must be negative' % name, 'ABORT')
-          sys.exit(0)
+          critical('%s must be negative' % name)
      
-
   contact_dist_lower, contact_dist_upper = sorted([contact_dist_lower, contact_dist_upper])
   backbone_dist_lower, backbone_dist_upper = sorted([backbone_dist_lower, backbone_dist_upper])
   temp_end, temp_start = sorted([temp_end, temp_start])
@@ -712,17 +866,15 @@ if __name__ == '__main__':
 
   anneal_params = {'temp_start':temp_start, 'temp_end':temp_end, 'temp_steps':temp_steps,
                    'dynamics_steps':dynamics_steps, 'time_step':time_step}
-
   
   isolation_threshold *= 1e6
   
   calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
-                        particle_sizes, num_models, isolation_threshold)
+                        particle_sizes, num_models, isolation_threshold, out_format, num_cpu)
 
 # TO DO
 # -----
 # Allow chromosomes to be specified
-# Add an official NucDynamics struture output format
 # Allow starting structures to be input
 
 

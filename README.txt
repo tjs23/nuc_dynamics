@@ -4,17 +4,18 @@ NucDynamics
 NucDynamics is a Python/Cython program for the calculation of genome structures
 from single-cell Hi-C chromosome contact data using a simulated annealing
 particle dynamics protocol. This software takes NCC format contact data (as
-output by NucProcess) and creates PDB (ProteinDataBank) format files. The result
-of the structure calculation is output in PDB format so that it may be viewed in
-molecular graphics software such as PyMol. Further output formats will be
-supported in the near future.
+output by NucProcess) and creates 3D coordinates, which are output as N3D (a
+simple tab-separated format, see below) or PDB (ProteinDataBank) format files.
+If the result of the calculation is output as PDB format the structures may be
+viewed in molecular graphics software such as PyMol. Further output formats will
+be supported in the near future.
 
 To run NucDynamics issue the 'nuc_dynamics' command line followed by the
 name/location of an input NCC format contact file. Various options may be
 specfied on the command line using flags that are prefixed with '-'. A full
 listing of these is given below, but commonly -o (the output coordinate file),
--m (the number of conformational models to generate) and -s (the particle size
-or sizes to use) will be specified.
+-m (the number of conformational models to generate), -f (output file format)
+and -s (the particle size or sizes to use) will be specified.
 
 Parameters relating to the restraint distances are not normally changed when
 calculating interphase genome structures. However, the annealing stage
@@ -82,15 +83,15 @@ using the setup_cython.py script as follows:
 Running NucDynamics
 -------------------
 
-Typical use, generating 10 conformational models:
+Typical use, generating 10 conformational models in PDB format:
 
-  nuc_dynamics example_chromo_data/Cell_1_contacts.ncc -m 10
+  nuc_dynamics example_chromo_data/Cell_1_contacts.ncc -m 10 -f pdb
 
 
 Specifying the particle sizes (8 Mb, 2 Mb, 1 Mb, 500 kb) and an output file
 name:
 
-  nuc_dynamics example_chromo_data/Cell_1_contacts.ncc -m 10 -o Cell_1.pdb -s 8 2 1 0.5
+  nuc_dynamics example_chromo_data/Cell_1_contacts.ncc -m 10 -f pdb -o Cell_1.pdb -s 8 2 1 0.5
 
 
 Example Data
@@ -100,11 +101,45 @@ Example NCC format contact data to demonstrate NucDynamics is avaiable in the
 example_chromo_data sub-directory, as a .tar.gz archive which must be extracted
 before use. 
 
+N3D coordinate format
+---------------------
+
+The default N3D output file format for genomic 3D coordinate positions is a
+simple whitespace-separated format consisting of blocks of lines for separate
+chromosomes (or other named sequence segments). Each block consists of a header
+line, giving the chrosome name, number of coordinates (i.e. number of particle
+positions) and the number of alternative coordinate models. The subsequent
+particle data lines for the chromosome contain the basebair sequence position
+followed by cartesian (X, Y, Z) coordinates for each alternative model.
+
+i.e. each block is arranged like:
+
+  chr_name      num_coords    num_models
+  seq_pos_a     xa1     ya1     za1     xa2     ya2     za2     xa3     ya3     za3      ...
+  seq_pos_b     xb1     yb1     zb1     xb2     yb2     zb2     xb3     yb3     zb3      ...
+  ...
+
+For example the lines for two chromosomes, each with 5 positions/coordinates and
+1 model could be:
+
+  chr7    5       1
+  3000000 9.58282628      7.00573100      -1.83845778
+  3100000 9.59673638      5.97364070      -2.01971472
+  3200000 10.96127666     5.81146425      -1.89757439
+  3300000 10.62732797     4.85757116      -1.96395929
+  3400000 10.12147618     5.03441764      -1.01074847
+  chrX    5       1
+  3100000 -4.90378489     5.82575335      -2.68593345
+  3200000 -3.82554225     5.68513329      -2.78682360
+  3300000 -2.86136185     5.20402428      -2.68921585
+  3400000 -3.37860658     4.53744574      -2.09833147
+  3500000 -4.05993187     3.72324210      -2.17562361
+ 
 
 Command line options for nuc_dynamics
 -------------------------------------
 
-usage: nuc_dynamics [-h] [-o PDB_FILE] [-m NUM_MODELS]
+usage: nuc_dynamics [-h] [-o OUT_FILE] [-m NUM_MODELS] [-f OUT_FORMAT]
                     [-s Mb_SIZE [Mb_SIZE ...]] [-iso Mb_SIZE] [-pow FLOAT]
                     [-lower DISTANCE] [-upper DISTANCE] [-bb_lower DISTANCE]
                     [-bb_upper DISTANCE] [-ran INT] [-rad DISTANCE]
@@ -122,12 +157,14 @@ positional arguments:
 
 optional arguments:
   -h, --help            show this help message and exit
-  -o PDB_FILE           Optional name of PDB format output file for 3D
-                        coordinates. If not set this will be auto-generated
-                        from the input file name
+  -o OUT_FILE           Optional name of output file for 3D coordinates in N3D
+                        or PDB format (see -f option). If not set this will be
+                        auto-generated from the input file name
   -m NUM_MODELS         Number of alternative conformations to generate from
                         repeat calculations with different random starting
                         coordinates: Default: 1
+  -f OUT_FORMAT         File format for output 3D coordinate file. Default:
+                        "n3d". Also available: "pdb"
   -s Mb_SIZE [Mb_SIZE ...]
                         One or more sizes (Mb) for the hierarchical structure
                         calculation protocol (will be used in descending
@@ -161,8 +198,6 @@ optional arguments:
   -time_step TIME_DELTA
                         Simulation time step between re-calculation of
                         particle velocities. Default: 0.001
-
-For further help on running this program please email tjs23@cam.ac.uk
 
 
 Jupyter Script
