@@ -656,8 +656,14 @@ def test_imports(gui=False):
   try:
     import dyn_util
   except ImportError as err:
-    warn('Utility C/Cython code not compiled. Attempting to compile now...')    
-    run_setup('setup_cython.py', ['build_ext', '--inplace'])
+    import os
+    cwd = os.getcwd()
+    try:
+      os.chdir(os.path.dirname(os.path.normpath(__file__)))
+      warn('Utility C/Cython code not compiled. Attempting to compile now...')    
+      run_setup('setup_cython.py', ['build_ext', '--inplace'])
+    finally:
+      os.chdir(cwd)
     
     try:
       import dyn_util
@@ -838,7 +844,7 @@ if __name__ == '__main__':
       
       else:
         if val <= 0.0:
-          warcriticaln('%s must be positive' % name)
+          critical('%s must be positive' % name)
       
     elif '-' in sign:  
       if '0' in sign:
