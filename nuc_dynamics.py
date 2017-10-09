@@ -575,7 +575,26 @@ def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
     return coords_dict, seq_pos_dict
 
 
-def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, anneal_params,
+def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, particle_size):
+  
+  # Save final coords as N3D or PDB format file
+  
+  if out_format == PDB:
+    if not out_file_path.endswith(PDB):
+      out_file_path = '%s.%s' % (out_file_path, PDB)
+  
+    export_pdb_coords(out_file_path, coords_dict, particle_seq_pos, particle_size)
+ 
+  else:
+    if not out_file_path.endswith(N3D):
+      out_file_path = '%s.%s' % (out_file_path, N3D)
+      
+    export_n3d_coords(out_file_path, coords_dict, particle_seq_pos)
+    
+  print('Saved structure file to: %s' % out_file_path)
+
+
+def calc_genome_structure(ncc_file_path, out_file_path, general_params, general_calc_params, anneal_params,
                           particle_sizes, num_models=5, isolation_threshold=2e6,
                           out_format=N3D, num_cpu=MAX_CORES):
 
@@ -613,26 +632,17 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
                                                     general_calc_params, anneal_params,
                                                     prev_seq_pos, start_coords, num_cpu)
  
+      if general_params['save_intermediate'] and stage < len(particle_sizes)-1:
+        file_path = '%s_%d.%s' % (out_file_path[:-4], stage, out_file_path[-3:]) # DANGER: assumes that suffix is 3 chars
+        export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size)
+        
       # Next stage based on previous stage's 3D coords
       # and their respective seq. positions
       start_coords = coords_dict
       prev_seq_pos = particle_seq_pos
 
-  # Save final coords as N3D or PDB format file
-  
-  if out_format == PDB:
-    if not out_file_path.endswith(PDB):
-      out_file_path = '%s.%s' % (out_file_path, PDB)
-  
-    export_pdb_coords(out_file_path, coords_dict, particle_seq_pos, particle_size)
- 
-  else:
-    if not out_file_path.endswith(N3D):
-      out_file_path = '%s.%s' % (out_file_path, N3D)
-      
-    export_n3d_coords(out_file_path, coords_dict, particle_seq_pos)
-    
-  print('Saved structure file to: %s' % out_file_path)
+  # Save final coords
+  export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, particle_size)
 
 
 def test_imports(gui=False):
@@ -738,6 +748,9 @@ if __name__ == '__main__':
   arg_parse.add_argument('-o', metavar='OUT_FILE',
                          help='Optional name of output file for 3D coordinates in N3D or PDB format (see -f option). If not set this will be auto-generated from the input file name')
 
+  arg_parse.add_argument('-save_int', default=False, action='store_true',
+                         help='Write out intermediate coordinate files.')
+
   arg_parse.add_argument('-m', default=1, metavar='NUM_MODELS',
                          type=int, help='Number of alternative conformations to generate from repeat calculations with different random starting coordinates: Default: 1')
 
@@ -818,6 +831,7 @@ if __name__ == '__main__':
   dynamics_steps = args['dyns']
   time_step = args['time_step']
   isolation_threshold = args['iso']
+  save_intermediate = args['save_int']
   
   if out_format not in FORMATS:
     critical('Output file format must be one of: %s' % ', '.join(FORMATS))
@@ -862,6 +876,8 @@ if __name__ == '__main__':
   if not random_seed:
     random_seed = int(time())
   
+  general_params = {'save_intermediate':save_intermediate}
+  
   general_calc_params = {'dist_power_law':dist_power_law,
                          'contact_dist_lower':contact_dist_lower,
                          'contact_dist_upper':contact_dist_upper,
@@ -875,7 +891,7 @@ if __name__ == '__main__':
   
   isolation_threshold *= 1e6
   
-  calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
+  calc_genome_structure(ncc_file_path, save_path, general_params, general_calc_params, anneal_params,
                         particle_sizes, num_models, isolation_threshold, out_format, num_cpu)
 
 # TO DO
