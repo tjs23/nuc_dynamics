@@ -575,6 +575,85 @@ def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
     return coords_dict, seq_pos_dict
 
 
+def open_file(file_path, mode=None, gzip_exts=('.gz','.gzip')):
+  """
+  GZIP agnostic file opening
+  """
+  IO_BUFFER = int(4e6)
+  
+  if os.path.splitext(file_path)[1].lower() in gzip_exts:
+    file_obj = gzip.open(file_path, mode or 'rt')
+  else:
+    file_obj = open(file_path, mode or 'rU', IO_BUFFER)
+ 
+  return file_obj
+
+def load_n3d_coords(file_path):
+ """
+ Load genome structure coordinates and particle sequence positions from an N3D format file.
+
+ Args:
+     file_path: str ; Location of N3D (text) format file
+
+ Returns:
+     dict {str:ndarray(n_coords, int)}                  ; {chromo: seq_pos_array}
+     dict {str:ndarray((n_models, n_coords, 3), float)} ; {chromo: coord_3d_array}
+
+ """
+ seq_pos_dict = {}
+ coords_dict = {}
+
+ with open_file(file_path) as file_obj:
+   chromo = None
+
+   for line in file_obj:
+
+     data = line.split()
+     n_items = len(data)
+
+     if not n_items:
+       continue
+
+     elif data[0] == '#':
+       continue
+
+     elif n_items == 3:
+       chromo, n_coords, n_models = data
+
+       #if chromo.lower()[:3] == 'chr':
+       #  chromo = chromo[3:]
+
+       n_coords = int(n_coords)
+       n_models = int(n_models)
+
+       #chromo_seq_pos = np.empty(n_coords, int)
+       chromo_seq_pos = np.empty(n_coords, 'int32')
+       chromo_coords = np.empty((n_models, n_coords, 3), float)
+
+       coords_dict[chromo]  = chromo_coords
+       seq_pos_dict[chromo] = chromo_seq_pos
+
+       check = (n_models * 3) + 1
+       i = 0
+
+     elif not chromo:
+       raise Exception('Missing chromosome record in file %s' % file_path)
+
+     elif n_items != check:
+       msg = 'Data size in file %s does not match Position + Models * Positions * 3'
+       raise Exception(msg % file_path)
+
+     else:
+       chromo_seq_pos[i] = int(data[0])
+
+       coord = [float(x) for x in data[1:]]
+       coord = np.array(coord).reshape(n_models, 3)
+       chromo_coords[:,i] = coord
+       i += 1
+
+ return seq_pos_dict, coords_dict
+
+
 def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, particle_size):
   
   # Save final coords as N3D or PDB format file
@@ -594,9 +673,10 @@ def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, part
   print('Saved structure file to: %s' % out_file_path)
 
 
-def calc_genome_structure(ncc_file_path, out_file_path, general_params, general_calc_params, anneal_params,
+def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, anneal_params,
                           particle_sizes, num_models=5, isolation_threshold=2e6,
-                          out_format=N3D, num_cpu=MAX_CORES):
+                          out_format=N3D, num_cpu=MAX_CORES,
+                          start_coords_path=None, save_intermediate=False):
 
   from time import time
 
@@ -613,6 +693,12 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_params, general_
   # so that coordinates can be interpolated to higher resolution
   prev_seq_pos = None
 
+  if start_coords_path:
+    prev_seq_pos, start_coords = load_n3d_coords(start_coords_path)
+    if start_coords:
+      chromo = next(iter(start_coords)) # picks out arbitrary chromosome
+      num_models = len(start_coords[chromo])
+    
   for stage, particle_size in enumerate(particle_sizes):
  
       print("Running structure caculation stage %d (%d kb)" % (stage+1, (particle_size/1e3)))
@@ -632,7 +718,7 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_params, general_
                                                     general_calc_params, anneal_params,
                                                     prev_seq_pos, start_coords, num_cpu)
  
-      if general_params['save_intermediate'] and stage < len(particle_sizes)-1:
+      if save_intermediate and stage < len(particle_sizes)-1:
         file_path = '%s_%d.%s' % (out_file_path[:-4], stage, out_file_path[-3:]) # DANGER: assumes that suffix is 3 chars
         export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size)
         
@@ -735,7 +821,6 @@ if __name__ == '__main__':
   import os, sys
   from time import time
   from argparse import ArgumentParser
-  from nuc_dynamics import calc_genome_structure
   
   epilog = 'For further help on running this program please email tjs23@cam.ac.uk'
   
@@ -748,8 +833,11 @@ if __name__ == '__main__':
   arg_parse.add_argument('-o', metavar='OUT_FILE',
                          help='Optional name of output file for 3D coordinates in N3D or PDB format (see -f option). If not set this will be auto-generated from the input file name')
 
-  arg_parse.add_argument('-save_int', default=False, action='store_true',
+  arg_parse.add_argument('-save_intermediate', default=False, action='store_true',
                          help='Write out intermediate coordinate files.')
+
+  arg_parse.add_argument('-start_coords_path', metavar='N3D_FILE',
+                         help='Initial 3D coordinates in N3D format. If set this will override -m flag.')
 
   arg_parse.add_argument('-m', default=1, metavar='NUM_MODELS',
                          type=int, help='Number of alternative conformations to generate from repeat calculations with different random starting coordinates: Default: 1')
@@ -831,7 +919,8 @@ if __name__ == '__main__':
   dynamics_steps = args['dyns']
   time_step = args['time_step']
   isolation_threshold = args['iso']
-  save_intermediate = args['save_int']
+  save_intermediate = args['save_intermediate']
+  start_coords_path = args['start_coords_path']
   
   if out_format not in FORMATS:
     critical('Output file format must be one of: %s' % ', '.join(FORMATS))
@@ -875,9 +964,7 @@ if __name__ == '__main__':
   
   if not random_seed:
     random_seed = int(time())
-  
-  general_params = {'save_intermediate':save_intermediate}
-  
+    
   general_calc_params = {'dist_power_law':dist_power_law,
                          'contact_dist_lower':contact_dist_lower,
                          'contact_dist_upper':contact_dist_upper,
@@ -891,8 +978,9 @@ if __name__ == '__main__':
   
   isolation_threshold *= 1e6
   
-  calc_genome_structure(ncc_file_path, save_path, general_params, general_calc_params, anneal_params,
-                        particle_sizes, num_models, isolation_threshold, out_format, num_cpu)
+  calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
+                        particle_sizes, num_models, isolation_threshold, out_format, num_cpu,
+                        start_coords_path, save_intermediate)
 
 # TO DO
 # -----
