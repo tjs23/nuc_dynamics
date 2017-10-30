@@ -134,8 +134,8 @@ def load_ncc_file(file_path):
       contacts = np.array(contact_dict[chr_a][chr_b]).T
       contact_dict[chr_a][chr_b] = contacts
       
-      seq_pos_a = contacts[1]
-      seq_pos_b = contacts[2]
+      seq_pos_a = contacts[0]
+      seq_pos_b = contacts[1]
       
       min_a = min(seq_pos_a)
       max_a = max(seq_pos_a)
