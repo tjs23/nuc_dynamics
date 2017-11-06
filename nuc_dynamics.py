@@ -645,7 +645,10 @@ def merge_dicts(*dicts):
   new = {k: concatenate(v) for k, v in new.items()}
   return unflatten_dict(new)
 
+def determine_bead_size(particle_size):
   
+  return particle_size ** (1/3)
+
 def anneal_genome(contact_dict, num_models, particle_size,
                   general_calc_params, anneal_params,
                   prev_seq_pos_dict=None, start_coords=None, num_cpu=MAX_CORES):
@@ -662,7 +665,7 @@ def anneal_genome(contact_dict, num_models, particle_size,
     from functools import partial
     import gc
 
-    bead_size = particle_size ** (1/3)
+    bead_size = determine_bead_size(particle_size)
 
     random.seed(general_calc_params['random_seed'])
     
@@ -860,17 +863,22 @@ def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, part
   
   # Save final coords as N3D or PDB format file
   
+  bead_size = determine_bead_size(particle_size)
+  coords_dict_scaled = {}
+  for chromo in coords_dict:
+    coords_dict_scaled[chromo] = coords_dict[chromo] / bead_size
+  
   if out_format == PDB:
     if not out_file_path.endswith(PDB):
       out_file_path = '%s.%s' % (out_file_path, PDB)
   
-    export_pdb_coords(out_file_path, coords_dict, particle_seq_pos, particle_size)
+    export_pdb_coords(out_file_path, coords_dict_scaled, particle_seq_pos, particle_size)
  
   else:
     if not out_file_path.endswith(N3D):
       out_file_path = '%s.%s' % (out_file_path, N3D)
       
-    export_n3d_coords(out_file_path, coords_dict, particle_seq_pos)
+    export_n3d_coords(out_file_path, coords_dict_scaled, particle_seq_pos)
     
   print('Saved structure file to: %s' % out_file_path)
 
