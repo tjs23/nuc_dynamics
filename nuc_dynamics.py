@@ -1,4 +1,5 @@
 # Python functions for NucDynamics
+import os
 import sys
 import numpy as np
 import multiprocessing
@@ -11,6 +12,10 @@ N3D = 'n3d'
 PDB = 'pdb'
 FORMATS = [N3D, PDB]
 MAX_CORES = multiprocessing.cpu_count()
+
+Restraint = np.dtype([('indices', 'int32', 2), ('dists', 'float64', 2),
+                      ('ambiguity', 'int32'),  ('weight', 'float64')])
+Contact = np.dtype([('pos', 'uint32', 2), ('ambiguity', 'int32')])
 
 def warn(msg, prefix='WARNING'):
 
@@ -83,80 +88,58 @@ def parallel_split_job(target_func, split_data, common_args, num_cpu=MAX_CORES, 
 
 def load_ncc_file(file_path):
   """Load chromosome and contact data from NCC format file, as output from NucProcess"""
-  
+
+  from numpy import array
+
   if file_path.endswith('.gz'):
     import gzip
-    file_obj = gzip.open(file_path)
-  
+    f_open = gzip.open
   else:
-    file_obj = open(file_path) 
-  
-  # Observations are treated individually in single-cell Hi-C,
-  # i.e. no binning, so num_obs always 1 for each contact
-  num_obs = 1  
-    
+    f_open = open
+
   contact_dict = {}
-  chromosomes = set()
-    
-  for line in file_obj:
-    chr_a, f_start_a, f_end_a, start_a, end_a, strand_a, chr_b, f_start_b, f_end_b, start_b, end_b, strand_b, ambig_group, pair_id, swap_pair = line.split()
-    
-    if strand_a == '+':
-      pos_a = int(f_start_a)
-    else:
-      pos_a = int(f_end_a)
-    
-    if strand_b == '+':
-      pos_b = int(f_start_b)       
-    else:
-      pos_b = int(f_end_b)
- 
-    if chr_a > chr_b:
-      chr_a, chr_b = chr_b, chr_a
-      pos_a, pos_b = pos_b, pos_a
-    
-    if chr_a not in contact_dict:
-      contact_dict[chr_a] = {}
-      chromosomes.add(chr_a)
-      
-    if chr_b not in contact_dict[chr_a]:
-      contact_dict[chr_a][chr_b] = [] 
-      chromosomes.add(chr_b)
-        
-    contact_dict[chr_a][chr_b].append((pos_a, pos_b, num_obs, int(ambig_group)))
-   
-  file_obj.close()
-  
-  chromo_limits = {}
-    
+
+  with f_open(file_path) as file_obj:
+    for line in file_obj:
+      if line.startswith('#'):
+          continue
+      chr_a, f_start_a, f_end_a, start_a, end_a, strand_a, chr_b, f_start_b, f_end_b, start_b, end_b, strand_b, ambig_group, pair_id, swap_pair = line.split()
+
+      pos_a = int(f_start_a if strand_a == '+' else f_end_a)
+      pos_b = int(f_start_b if strand_b == '+' else f_end_b)
+
+      if chr_a > chr_b:
+        chr_a, chr_b = chr_b, chr_a
+        pos_a, pos_b = pos_b, pos_a
+
+      if chr_a not in contact_dict:
+        contact_dict[chr_a] = {}
+
+      if chr_b not in contact_dict[chr_a]:
+        contact_dict[chr_a][chr_b] = []
+
+      contact_dict[chr_a][chr_b].append(((pos_a, pos_b), int(ambig_group)))
+
   for chr_a in contact_dict:
     for chr_b in contact_dict[chr_a]:
-      contacts = np.array(contact_dict[chr_a][chr_b]).T
-      contact_dict[chr_a][chr_b] = contacts
-      
-      seq_pos_a = contacts[1]
-      seq_pos_b = contacts[2]
-      
-      min_a = min(seq_pos_a)
-      max_a = max(seq_pos_a)
-      min_b = min(seq_pos_b)
-      max_b = max(seq_pos_b)
-        
-      if chr_a in chromo_limits:
-        prev_min, prev_max = chromo_limits[chr_a]
-        chromo_limits[chr_a] = [min(prev_min, min_a), max(prev_max, max_a)]
-      else:
-        chromo_limits[chr_a] = [min_a, max_a]
-      
-      if chr_b in chromo_limits:
-        prev_min, prev_max = chromo_limits[chr_b]
-        chromo_limits[chr_b] = [min(prev_min, min_b), max(prev_max, max_b)]
-      else:
-        chromo_limits[chr_b] = [min_b, max_b]
-         
-  chromosomes = sorted(chromosomes)      
-        
-  return chromosomes, chromo_limits, contact_dict
+      contact_dict[chr_a][chr_b] = array(contact_dict[chr_a][chr_b], dtype=Contact)
+  return contact_dict
+  
+  
+def calc_limits(contact_dict):
+  chromo_limits = {}
+
+  for chrs, contacts in flatten_dict(contact_dict).items():
+    if len(contacts) < 1:
+      continue
+
+    for chromo, seq_pos in zip(chrs, contacts['pos'].T):
+      min_pos = seq_pos.min()
+      max_pos = seq_pos.max()
+
+      prev_min, prev_max = chromo_limits.get(chromo, (min_pos, max_pos))
+      chromo_limits[chromo] = [min(prev_min, min_pos), max(prev_max, max_pos)]
+  return chromo_limits
 
 
 def export_n3d_coords(file_path, coords_dict, seq_pos_dict):
@@ -282,6 +265,9 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
           
         aName = '%-3s' % a
         x, y, z = chromo_model_coords[i] #XYZ coordinates
+        x *= scale
+        y *= scale
+        z *= scale
          
         seqPrev = seqMb
         pos_chromo[c] = chromo
@@ -304,84 +290,114 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
   file_obj.close()
 
 
-def remove_isolated_contacts(contact_dict, threshold=int(2e6)):
+def between(x, a, b):
+  return (a < x) & (x < b)
+
+
+def remove_isolated_contacts(contact_dict, threshold=int(2e6), pos_error=100, ignore=()):
   """
   Select only contacts which are within a given sequence separation of another
   contact, for the same chromosome pair
   """
-    
-  for chromoA in contact_dict:
-    for chromoB in contact_dict[chromoA]:
-      contacts = contact_dict[chromoA][chromoB]
-      positions = np.array(contacts[:2], np.int32).T
-      
-      if len(positions): # Sometimes empty e.g. for MT, Y chromos 
-        active_idx = dyn_util.getSupportedPairs(positions, np.int32(threshold))
-        contact_dict[chromoA][chromoB] = contacts[:,active_idx]
-     
-  return contact_dict
-  
+  from numpy import array, zeros, eye
+  from collections import defaultdict
+  new_contacts = defaultdict(dict)
 
-def remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos, particle_size, threshold=5.0):  
+  for (chromoA, chromoB), contacts in flatten_dict(contact_dict).items():
+    # positions is N x 2 matrix, where there are N contacts (and the 2 is because of pos_a, pos_b)
+    positions = contacts['pos'].astype('int32')
+    if chromoA in ignore or chromoB in ignore:
+        new_contacts[chromoA][chromoB] = contacts
+        continue
+    if len(positions) == 0: # Sometimes empty e.g. for MT, Y chromos
+      continue
+    # positions[:, 0] and positions[:, 1] have shape N
+    # the [None, ...] converts that into shape 1 x N (but it looks like you don't need the ...)
+    pos_a = positions[:, 0][None, ...]
+    pos_b = positions[:, 1][None, ...]
+    nondiagonal = ~eye(len(positions), dtype='bool') # False on diagonal, True off diagonal
+
+    supported = zeros(len(positions), dtype='bool')
+    # do not need nondiagonal in first expression below as long as pos_error > 0
+    # the diagonal in the second expression so as not to include i if a_i happens to be close to b_i
+    # abs(pos_a - pos_b.T) gives N x N matrix with difference in positions between a_i and b_j
+    # we want both ends in a contact to be close to the ends in another contact
+    supported |= (between(abs(pos_a - pos_a.T), pos_error, threshold) &
+                  between(abs(pos_b - pos_b.T), pos_error, threshold)).any(axis=0)
+    supported |= (between(abs(pos_a - pos_b.T), pos_error, threshold) &
+                  between(abs(pos_b - pos_a.T), pos_error, threshold) &
+                  nondiagonal).any(axis=0)
+
+    if not supported.any():
+        continue
+    new_contacts[chromoA][chromoB] = contacts[supported]
+  return dict(new_contacts)
+
+
+def remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos, threshold=5.0):
   """
   Remove contacts whith structure distances that exceed a given threshold
   """
-  
+  from numpy import int32, sqrt, array
+  from collections import defaultdict
+  new_contacts = defaultdict(dict)
+
   for chr_a in contact_dict:
-    for chr_b in contact_dict[chr_a]:
-      contacts = contact_dict[chr_a][chr_b]
-      
-      contact_pos_a = contacts[0].astype(np.int32)
-      contact_pos_b = contacts[1].astype(np.int32)
-      
+    if chr_a not in coords_dict:
+      continue
+    for chr_b, contacts in contact_dict[chr_a].items():
+      if chr_b not in coords_dict:
+        continue
+
+      contact_pos_a = contacts['pos'][:, 0].astype(int32)
+      contact_pos_b = contacts['pos'][:, 1].astype(int32)
+
       coords_a = coords_dict[chr_a]
       coords_b = coords_dict[chr_b]
 
       struc_dists = []
- 
+
       for m in range(len(coords_a)):
-        coord_data_a = dyn_util.getInterpolatedCoords([chr_a], {chr_a:contact_pos_a}, particle_seq_pos, coords_a[m])
-        coord_data_b = dyn_util.getInterpolatedCoords([chr_b], {chr_b:contact_pos_b}, particle_seq_pos, coords_b[m])
- 
+        coord_data_a = get_interpolated_coords(coords_a[m], contact_pos_a, particle_seq_pos[chr_a])
+        coord_data_b = get_interpolated_coords(coords_b[m], contact_pos_b, particle_seq_pos[chr_b])
+
         deltas = coord_data_a - coord_data_b
-        dists = np.sqrt((deltas*deltas).sum(axis=1))
+        dists = sqrt((deltas*deltas).sum(axis=1))
         struc_dists.append(dists)
-      
+
       # Average over all conformational models
-      struc_dists = np.array(struc_dists).T.mean(axis=1)
-      
+      struc_dists = array(struc_dists).T.mean(axis=1)
+
       # Select contacts with distances below distance threshold
       indices = (struc_dists < threshold).nonzero()[0]
-      contact_dict[chr_a][chr_b] = contacts[:,indices]
-        
-  return contact_dict
+      new_contacts[chr_a][chr_b] = contacts[indices]
+
+  return dict(new_contacts)
   
   
-def get_random_coords(pos_dict, chromosomes, num_models, radius=10.0):
+def get_random_coords(shape, radius=10.0):
   """
   Get random, uniformly sampled coorinate positions, restricted to
-  a sphere of given radius
+  a nD-sphere of given radius
   """
-    
-  from numpy.random import uniform
-    
-  num_particles = sum([len(pos_dict[chromo]) for chromo in chromosomes])
-  coords = np.empty((num_models, num_particles, 3))
-  r2 = radius*radius
-    
-  for m in range(num_models):
-    
-    for i in range(num_particles):
-      x = y = z = radius
 
-      while x*x + y*y + z*z >= r2:
-        x = radius * (2*uniform(0,1) - 1)
-        y = radius * (2*uniform(0,1) - 1)
-        z = radius * (2*uniform(0,1) - 1)
-      
-      coords[m,i] = [x,y,z]
+  from numpy import random
+  from numpy.linalg import norm
 
-  return coords
+  u = random.uniform(size=shape[:-1])
+  x = random.normal(size=shape)
+  scaling = (radius * u ** (1/shape[-1])) / norm(x, axis=-1)
+  return scaling[..., None] * x
+
+
+def get_interpolated_coords(coords, pos, prev_pos):
+  from numpy import interp, apply_along_axis
+  from functools import partial
+
+  *size, length, ndim = coords.shape
+  coords = coords.reshape((-1, length, ndim))
+  coords = apply_along_axis(partial(interp, pos, prev_pos), 1, coords)
+  return coords.reshape(size + [len(pos), ndim])
   
   
 def pack_chromo_coords(coords_dict, chromosomes):
@@ -431,9 +447,9 @@ def unpack_chromo_coords(coords, chromosomes, seq_pos_dict):
   return coords_dict
 
 
-def anneal_model(model_data, anneal_schedule, masses, radii, restraint_indices, restraint_dists,
-                 ambiguity, temp, time_step, dyn_steps, repulse, n_rep_max):
-
+def anneal_model(model_data, anneal_schedule, masses, radii, restraints, repDists,
+                 ambiguity, temp, time_step, dyn_steps, repulse, dist):
+                             
   import gc
   
   m, model_coords = model_data
@@ -456,14 +472,15 @@ def anneal_model(model_data, anneal_schedule, masses, radii, restraint_indices, 
     # Update coordinates for this temp
     
     try:  
-      dt, n_rep_max = dyn_util.runDynamics(model_coords, masses, radii, restraint_indices, restraint_dists,
-                                           ambiguity, temp, time_step, dyn_steps, repulse, nRepMax=n_rep_max,
-                                           printInterval=printInterval)
+      dt = dyn_util.runDynamics(model_coords, masses, radii, repDists,
+              restraints['indices'], restraints['dists'], restraints['weight'], ambiguity,
+              temp, time_step, dyn_steps, repulse, dist,
+              printInterval=printInterval)
     
     except Exception as err:
       return err
  
-    n_rep_max = np.int32(1.05 * n_rep_max) # Base on num in prev cycle, plus a small overhead
+    #n_rep_max = np.int32(1.05 * n_rep_max) # Base on num in prev cycle, plus a small overhead
     time_taken += dt
   
   # Center
@@ -473,8 +490,163 @@ def anneal_model(model_data, anneal_schedule, masses, radii, restraint_indices, 
   
   return model_coords
  
+
+def calc_bins(chromo_limits, particle_size):
+  from numpy import arange
+  from math import ceil
+
+  bins = {}
+  for chromo, (start, end) in chromo_limits.items():
+    startBin = start // particle_size
+    endBin = 1 + (end-1) // particle_size
+    start = particle_size * startBin
+    end = particle_size * endBin
+    bins[chromo] = arange(start, end, particle_size, dtype='int32')
+  return bins
+
+
+def calc_ambiguity_offsets(groups):
+  """
+  Convert (sorted) ambiguity groups to group-offsets for
+  annealing calculations.
+  """
+  from numpy import flatnonzero, zeros
+
+  group_starts = zeros(len(groups) + 1, dtype='bool')
+  group_starts[-1] = group_starts[0] = 1
+  group_starts[:-1] |= groups == 0
+  group_starts[1:-1] |= groups[1:] != groups[:-1]
+  return flatnonzero(group_starts).astype('int32')
+
+
+def backbone_restraints(seq_pos, particle_size, scale=1.0, lower=0.1, upper=1.1, weight=1.0):
+  from numpy import empty, arange, array
+
+  restraints = empty(len(seq_pos) - 1, dtype=Restraint)
+  offsets = array([0, 1], dtype='int')
+  restraints['indices'] = arange(len(restraints))[:, None] + offsets
+
+  # Normally 1.0 for regular sized particles
+  bounds = array([lower, upper], dtype='float') * scale
+  restraints['dists'] = ((seq_pos[1:] - seq_pos[:-1]) / particle_size)[:, None] * bounds
+  restraints['ambiguity'] = 0 # Use '0' to represent no ambiguity
+  restraints['weight'] = weight
+
+  return restraints
+
+
+def flatten_dict(d):
+  r = {}
+  for key, value in d.items():
+    if isinstance(value, dict):
+      r.update({(key,) + k: v for k, v in flatten_dict(value).items()})
+    else:
+      r[(key,)] = value
+  return r
+
+
+def tree():
+    from collections import defaultdict
+    def tree_():
+        return defaultdict(tree_)
+    return tree_()
+
+
+def unflatten_dict(d):
+    r = tree()
+
+    for ks, v in d.items():
+        d = r
+        for k in ks[:-1]:
+            d = d[k]
+        d[ks[-1]] = v
+    return r
+
+
+def concatenate_restraints(restraint_dict, pos_dict):
+  from itertools import accumulate, chain
+  from functools import partial
+  from numpy import concatenate, array, empty
+  import operator as op
+
+  chromosomes = sorted(pos_dict)
+  chromosome_offsets = dict(zip(chromosomes, accumulate(chain(
+    [0], map(len, map(partial(op.getitem, pos_dict), chromosomes)))
+  )))
+  flat_restraints = sorted(flatten_dict(restraint_dict).items())
+
+  r = concatenate(list(map(op.itemgetter(1), flat_restraints)))
+  r['indices'] = concatenate([
+    restraints['indices'] + array([[chromosome_offsets[c] for c in chrs]])
+    for chrs, restraints in flat_restraints
+  ])
+
+  return r
+
+
+def calc_restraints(contact_dict, pos_dict, particle_size,
+                    scale=1.0, lower=0.8, upper=1.2, weight=1.0):
+  from numpy import empty, array, searchsorted
+  from collections import defaultdict, Counter
+
+  dists = array([[lower, upper]]) * scale
+
+  r = defaultdict(dict)
+  for (chr_a, chr_b), contacts in flatten_dict(contact_dict).items():
+    if len(contacts) < 1:
+        continue
+    r[chr_a][chr_b] = empty(len(contacts), dtype=Restraint)
+
+    # below is not quite correct if pos_dict[chr_a] value is exactly the same as contacts['pos'][:, 0]
+    # (and similarly for chr_b) because then you don't want to subtract 1
+    idxs_a = searchsorted(pos_dict[chr_a], contacts['pos'][:, 0]) - 1 # -1 because want bin that is floor
+    idxs_b = searchsorted(pos_dict[chr_b], contacts['pos'][:, 1]) - 1
+    # pos_dict[chromo] gives the bin positions so pos_dict[chromo][0] gives the first bin position
+    #idxs_a = (contacts['pos'][:, 0] - pos_dict[chr_a][0]) // particle_size  # bin number
+    #idxs_b = (contacts['pos'][:, 1] - pos_dict[chr_b][0]) // particle_size
+    r[chr_a][chr_b]['indices'] = array([idxs_a, idxs_b]).T
+    r[chr_a][chr_b]['ambiguity'] = contacts['ambiguity']
+    r[chr_a][chr_b]['dists'] = dists
+    r[chr_a][chr_b]['weight'] = weight
+  return dict(r)
+
+
+def bin_restraints(restraints):
+  from numpy import unique, bincount, empty, concatenate, sort, copy
+  restraints = copy(restraints)
+  restraints['indices'] = sort(restraints['indices'], axis=1)
+
+  # Ambiguity group 0 is unique restraints, so they can all be binned
+  _, inverse, counts = unique(
+    restraints['ambiguity'], return_inverse=True, return_counts=True
+  )
+  restraints['ambiguity'][counts[inverse] == 1] = 0
+
+  # Bin within ambiguity groups
+  uniques, idxs = unique(
+    restraints[['ambiguity', 'indices', 'dists']], return_inverse=True
+  )
+
+  binned = empty(len(uniques), dtype=Restraint)
+  binned['ambiguity'] = uniques['ambiguity']
+  binned['indices'] = uniques['indices']
+  binned['dists'] = uniques['dists']
+  binned['weight'] = bincount(idxs, weights=restraints['weight'])
+  return binned
+
+def merge_dicts(*dicts):
+  from collections import defaultdict
+  from numpy import empty, concatenate
+
+  new = defaultdict(list)
+  for d in dicts:
+    for k, v in flatten_dict(d).items():
+      new[k].append(v)
+  new = {k: concatenate(v) for k, v in new.items()}
+  return unflatten_dict(new)
+
   
-def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
+def anneal_genome(contact_dict, num_models, particle_size,
                   general_calc_params, anneal_params,
                   prev_seq_pos_dict=None, start_coords=None, num_cpu=MAX_CORES):
     """
@@ -484,67 +656,94 @@ def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
     resolution) stage.
     """
     
-    from numpy import random
+    from numpy import (int32, ones, empty, random, concatenate, stack, argsort, arange,
+                       arctan, full, zeros)
     from math import log, exp, atan, pi
-    
+    from functools import partial
+    import gc
+
+    bead_size = particle_size ** (1/3)
+
     random.seed(general_calc_params['random_seed'])
-    particle_size = np.int32(particle_size)
     
-    # Calculate distance restrains from contact data   
-    restraint_dict, seq_pos_dict = dyn_util.calc_restraints(chromosomes, contact_dict, particle_size,
-                                                   scale=1.0, exponent=general_calc_params['dist_power_law'],
-                                                   lower=general_calc_params['contact_dist_lower'],
-                                                   upper=general_calc_params['contact_dist_upper'])
+    particle_size = int32(particle_size)
+    seq_pos_dict = calc_bins(calc_limits(contact_dict), particle_size)
     
-    # Concatenate chromosomal data into a single array of particle restraints
-    # for structure calculation. Add backbone restraints between seq. adjasent particles.
-    restraint_indices, restraint_dists = dyn_util.concatenate_restraints(restraint_dict, seq_pos_dict, particle_size,
-                                                                general_calc_params['backbone_dist_lower'],
-                                                                general_calc_params['backbone_dist_upper'])
- 
-    # Setup starting structure
-    if (start_coords is None) or (prev_seq_pos_dict is None):
-      coords = get_random_coords(seq_pos_dict, chromosomes, num_models,
-                                 general_calc_params['random_radius'])
-      
-      num_coords = coords.shape[1]
-            
-    else:
-      # Convert starting coord dict into single array
-      coords = pack_chromo_coords(start_coords, chromosomes)
-      num_coords = sum([len(seq_pos_dict[c]) for c in chromosomes])
-        
-      if coords.shape[1] != num_coords: # Change of particle_size
-        interp_coords = np.empty((num_models, num_coords, 3))
-        
-        for m in range(num_models): # Starting coords interpolated from previous particle positions
-          interp_coords[m] = dyn_util.getInterpolatedCoords(chromosomes, seq_pos_dict, prev_seq_pos_dict, coords[m])
-        
-        coords = interp_coords
-        
+    chromosomes = sorted(
+        set.union(set(contact_dict), *map(set, contact_dict.values()))
+    )
+
+    points = chromosomes[:]
+
+    restraint_dict = calc_restraints(
+        contact_dict, seq_pos_dict, particle_size, scale=bead_size,
+        lower=general_calc_params['contact_dist_lower'],
+        upper=general_calc_params['contact_dist_upper'], weight=1.0
+    )
+
+    # Adjust to keep force/particle approximately constant
+    # why 215 (in opencl version this is 430 instead)
+    dist = 215.0 * (sum(map(len, seq_pos_dict.values())) /
+                    sum(map(lambda v: v['weight'].sum(),
+                            flatten_dict(restraint_dict).values())))
+
+    restraint_dict = merge_dicts(
+      restraint_dict,
+      # Backbone restraints
+      {chromo: {chromo: backbone_restraints(
+        seq_pos_dict[chromo], particle_size, bead_size,
+        lower=general_calc_params['backbone_dist_lower'],
+        upper=general_calc_params['backbone_dist_upper'], weight=1.0
+      )} for chromo in chromosomes}
+    )
+
+    coords = start_coords or {}
+    for chromo in chromosomes:
+      if chromo not in coords:
+        coords[chromo] = get_random_coords(
+          (num_models, len(seq_pos_dict[chromo]), 3), general_calc_params['random_radius'] * bead_size
+        )
+      elif coords[chromo].shape[1] != len(seq_pos_dict[chromo]):
+        coords[chromo] = get_interpolated_coords(
+          coords[chromo], seq_pos_dict[chr], prev_seq_pos_dict[chromo]
+        )
+
     # Equal unit masses and radii for all particles
-    masses = np.ones(num_coords,  float)
-    radii = np.ones(num_coords,  float)
-    
-    # Ambiguiity strides not used here, so set to 1
-    num_restraints = len(restraint_indices)
-    ambiguity = np.ones(num_restraints,  np.int32)
+    masses = {chromo: ones(len(pos), float) for chromo, pos in seq_pos_dict.items()}
+
+    radii = {chromo: full(len(pos), bead_size, float)
+             for chromo, pos in seq_pos_dict.items()}
+    repDists = {chromo: r * 0.75 for chromo, r in radii.items()}
+
+    # Concatenate chromosomal data into a single array of particle restraints
+    # for structure calculation.
+    restraints = bin_restraints(concatenate_restraints(restraint_dict, seq_pos_dict))
+    coords = concatenate([coords[chromo] for chromo in points], axis=1)
+    masses = concatenate([masses[chromo] for chromo in points])
+    radii = concatenate([radii[chromo] for chromo in points])
+    repDists = concatenate([repDists[chromo] for chromo in points])
+
+    restraint_order = argsort(restraints['ambiguity'])
+    restraints = restraints[restraint_order]
+    ambiguity = calc_ambiguity_offsets(restraints['ambiguity'])
         
     # Below will be set to restrict memory allocation in the repusion list
     # (otherwise all vs all can be huge)
-    n_rep_max = np.int32(0)
+    #n_rep_max = np.int32(0)
     
     # Annealing parameters
     temp_start = anneal_params['temp_start']
     temp_end = anneal_params['temp_end']
     temp_steps = anneal_params['temp_steps']
     
-    # Setup annealig schedule: setup temps and repulsive terms
+    # Setup annealing schedule: setup temps and repulsive terms
     adj = 1.0 / atan(10.0)
     decay = log(temp_start/temp_end)    
     anneal_schedule = []
     
     for step in range(temp_steps):
+      gc.collect() # Try to free some memory
+      
       frac = step/float(temp_steps)
     
       # exponential temp decay
@@ -552,6 +751,9 @@ def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
     
       # sigmoidal repusion scheme
       repulse = 0.5 + adj * atan(frac*20.0-10) / pi 
+      
+      temp *= bead_size ** 2
+      repulse /= bead_size ** 2
       
       anneal_schedule.append((temp, repulse))  
         
@@ -561,8 +763,8 @@ def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
     time_step = anneal_params['time_step']
        
     # Update coordinates in the annealing schedule which is applied to each model in parallel
-    common_args = [anneal_schedule, masses, radii, restraint_indices, restraint_dists,
-                   ambiguity, temp, time_step, dyn_steps, repulse, n_rep_max]
+    common_args = [anneal_schedule, masses, radii, restraints, repDists,
+                   ambiguity, temp, time_step, dyn_steps, repulse, dist]
     
     task_data = [(m, coords[m]) for m in range(len(coords))]
     
@@ -681,10 +883,10 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
   from time import time
 
   # Load single-cell Hi-C data from NCC contact file, as output from NucProcess
-  chromosomes, chromo_limits, contact_dict = load_ncc_file(ncc_file_path)
+  contact_dict = load_ncc_file(ncc_file_path)
 
   # Only use contacts which are supported by others nearby in sequence, in the initial instance
-  remove_isolated_contacts(contact_dict, threshold=isolation_threshold)
+  contact_dict = remove_isolated_contacts(contact_dict, threshold=isolation_threshold)
 
   # Initial coords will be random
   start_coords = None
@@ -708,13 +910,13 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
       
       if stage > 0:
         if particle_size < 0.5e6:
-            remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
-                                     particle_size, threshold=6.0)
+            contact_dict = remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
+                                                    threshold=6.0)
         elif particle_size < 0.25e6:
-            remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
-                                     particle_size, threshold=5.0)
+            contact_dict = remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
+                                                    threshold=5.0)
  
-      coords_dict, particle_seq_pos = anneal_genome(chromosomes, contact_dict, num_models, particle_size,
+      coords_dict, particle_seq_pos = anneal_genome(contact_dict, num_models, particle_size,
                                                     general_calc_params, anneal_params,
                                                     prev_seq_pos, start_coords, num_cpu)
  
