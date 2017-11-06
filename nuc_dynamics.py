@@ -599,8 +599,8 @@ def calc_restraints(contact_dict, pos_dict, particle_size,
 
     # below is not quite correct if pos_dict[chr_a] value is exactly the same as contacts['pos'][:, 0]
     # (and similarly for chr_b) because then you don't want to subtract 1
-    idxs_a = searchsorted(pos_dict[chr_a], contacts['pos'][:, 0]) - 1 # -1 because want bin that is floor
-    idxs_b = searchsorted(pos_dict[chr_b], contacts['pos'][:, 1]) - 1
+    idxs_a = searchsorted(pos_dict[chr_a], contacts['pos'][:, 0], side='right') - 1 # -1 because want bin that is floor
+    idxs_b = searchsorted(pos_dict[chr_b], contacts['pos'][:, 1], side='right') - 1
     # pos_dict[chromo] gives the bin positions so pos_dict[chromo][0] gives the first bin position
     #idxs_a = (contacts['pos'][:, 0] - pos_dict[chr_a][0]) // particle_size  # bin number
     #idxs_b = (contacts['pos'][:, 1] - pos_dict[chr_b][0]) // particle_size
@@ -705,7 +705,7 @@ def anneal_genome(contact_dict, num_models, particle_size,
         )
       elif coords[chromo].shape[1] != len(seq_pos_dict[chromo]):
         coords[chromo] = get_interpolated_coords(
-          coords[chromo], seq_pos_dict[chr], prev_seq_pos_dict[chromo]
+          coords[chromo], seq_pos_dict[chromo], prev_seq_pos_dict[chromo]
         )
 
     # Equal unit masses and radii for all particles
