@@ -676,6 +676,11 @@ def anneal_genome(contact_dict, num_models, particle_size,
         set.union(set(contact_dict), *map(set, contact_dict.values()))
     )
 
+    chrs = list(chromosomes)
+    for chromo in chrs:
+      if chromo not in seq_pos_dict:
+        chromosomes.remove(chromo)
+        
     points = chromosomes[:]
 
     restraint_dict = calc_restraints(
