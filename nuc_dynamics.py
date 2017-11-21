@@ -290,6 +290,55 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
   file_obj.close()
 
 
+def remove_ambiguous_contacts(contact_dict):
+  
+  ambiguity_list = []
+  for contacts in flatten_dict(contact_dict).values():
+    ambiguity_list.extend(contacts['ambiguity'])
+    
+  ambiguity_array = np.array(sorted(ambiguity_list))
+  
+  _, inverse, counts = np.unique(
+    ambiguity_array, return_inverse=True, return_counts=True
+  )
+  
+  ambiguity_set = set(ambiguity_array[counts[inverse] == 1])
+
+  from collections import defaultdict
+  new_contacts = defaultdict(dict)
+
+  for (chromoA, chromoB), contacts in flatten_dict(contact_dict).items():
+    contacts = [c for c in contacts if c['ambiguity'] in ambiguity_set]
+    if contacts:
+      new_contacts[chromoA][chromoB] = np.array(contacts, dtype= Contact)
+  
+  return dict(new_contacts)
+  
+
+def homologous_pair(chromoA, chromoB):
+  
+  # slightly dangerous code, relies on chromoA/B being of form 'chr11.a', etc.
+  nA = chromoA.rfind('.')
+  nB = chromoB.rfind('.')
+  
+  if nA < 0 or nB < 0:
+    return False
+    
+  return (chromoA[:nA] == chromoB[:nB]) and (chromoA[nA+1:] != chromoB[nB+1:])
+  
+  
+def remove_homologous_pairs(contact_dict):
+
+  from collections import defaultdict
+  new_contacts = defaultdict(dict)
+  
+  for (chromoA, chromoB), contacts in flatten_dict(contact_dict).items():
+    if not homologous_pair(chromoA, chromoB):
+      new_contacts[chromoA][chromoB] = contacts
+  
+  return dict(new_contacts)
+
+
 def between(x, a, b):
   return (a < x) & (x < b)
 
@@ -888,15 +937,34 @@ def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, part
   print('Saved structure file to: %s' % out_file_path)
 
 
+def contact_count(contact_dict):
+  
+  count = 0
+  for contacts in flatten_dict(contact_dict).values():
+    count += len(contacts)
+    
+  return count
+  
+  
 def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, anneal_params,
                           particle_sizes, num_models=5, isolation_threshold=2e6,
                           out_format=N3D, num_cpu=MAX_CORES,
-                          start_coords_path=None, save_intermediate=False):
+                          start_coords_path=None, save_intermediate=False,
+                          remove_ambig_contacts=False, remove_homo_pairs=False):
 
   from time import time
 
   # Load single-cell Hi-C data from NCC contact file, as output from NucProcess
   contact_dict = load_ncc_file(ncc_file_path)
+  print('Total number of contacts = %d' % contact_count(contact_dict))
+  
+  if remove_ambig_contacts:
+    contact_dict = remove_ambiguous_contacts(contact_dict)
+    print('Total number of contacts after removing ambiguous ones = %d' % contact_count(contact_dict))
+
+  if remove_homo_pairs:
+    contact_dict = remove_homologous_pairs(contact_dict)
+    print('Total number of contacts after removing homologous pairs = %d' % contact_count(contact_dict))
 
   # Only use contacts which are supported by others nearby in sequence, in the initial instance
   contact_dict = remove_isolated_contacts(contact_dict, threshold=isolation_threshold)
@@ -934,7 +1002,11 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
                                                     prev_seq_pos, start_coords, num_cpu)
  
       if save_intermediate and stage < len(particle_sizes)-1:
-        file_path = '%s_%d.%s' % (out_file_path[:-4], stage, out_file_path[-3:]) # DANGER: assumes that suffix is 3 chars
+        n = out_file_path.rfind('.')
+        if n == len(out_file_path)-3: # DANGER: assumes that suffix is 3 chars and do not have .xyz without also .n3d/.pdb
+          file_path = '%s_%d.%s' % (out_file_path[:-4], stage, out_file_path[-3:])
+        else:
+          file_path = '%s_%d' % (out_file_path, stage)
         export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size)
         
       # Next stage based on previous stage's 3D coords
@@ -1054,6 +1126,12 @@ if __name__ == '__main__':
   arg_parse.add_argument('-start_coords_path', metavar='N3D_FILE',
                          help='Initial 3D coordinates in N3D format. If set this will override -m flag.')
 
+  arg_parse.add_argument('-remove_ambig_contacts', default=False, action='store_true',
+                         help='Remove all contacts in any ambiguity group with more than one contact.')
+
+  arg_parse.add_argument('-remove_homo_pairs', default=False, action='store_true',
+                         help='Remove all contacts between homologous pairs (e.g. chr11.a to chr11.b).')
+
   arg_parse.add_argument('-m', default=1, metavar='NUM_MODELS',
                          type=int, help='Number of alternative conformations to generate from repeat calculations with different random starting coordinates: Default: 1')
 
@@ -1136,6 +1214,8 @@ if __name__ == '__main__':
   isolation_threshold = args['iso']
   save_intermediate = args['save_intermediate']
   start_coords_path = args['start_coords_path']
+  remove_ambig_contacts = args['remove_ambig_contacts']
+  remove_homo_pairs = args['remove_homo_pairs']
   
   if out_format not in FORMATS:
     critical('Output file format must be one of: %s' % ', '.join(FORMATS))
@@ -1195,7 +1275,7 @@ if __name__ == '__main__':
   
   calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
                         particle_sizes, num_models, isolation_threshold, out_format, num_cpu,
-                        start_coords_path, save_intermediate)
+                        start_coords_path, save_intermediate, remove_ambig_contacts, remove_homo_pairs)
 
 # TO DO
 # -----
