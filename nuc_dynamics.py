@@ -1003,10 +1003,11 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
  
       if save_intermediate and stage < len(particle_sizes)-1:
         n = out_file_path.rfind('.')
+        size = int(particle_size/1000)
         if n == len(out_file_path)-3: # DANGER: assumes that suffix is 3 chars and do not have .xyz without also .n3d/.pdb
-          file_path = '%s_%d.%s' % (out_file_path[:-4], stage, out_file_path[-3:])
+          file_path = '%s_%d.%s' % (out_file_path[:-4], size, out_file_path[-3:])
         else:
-          file_path = '%s_%d' % (out_file_path, stage)
+          file_path = '%s_%d' % (out_file_path, size)
         export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size)
         
       # Next stage based on previous stage's 3D coords
