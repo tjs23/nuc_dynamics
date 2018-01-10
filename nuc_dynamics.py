@@ -988,14 +988,15 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
  
       # Can remove large violations (noise contacts inconsistent with structure)
       # once we have a reasonable resolution structure
+      bead_size = determine_bead_size(particle_size)
       
       if stage > 0:
-        if particle_size < 0.5e6:
+        if particle_size < 0.25e6:
             contact_dict = remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
-                                                    threshold=6.0)
-        elif particle_size < 0.25e6:
+                                                    threshold=5.0*bead_size)
+        elif particle_size < 0.5e6:
             contact_dict = remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
-                                                    threshold=5.0)
+                                                    threshold=6.0*bead_size)
  
       coords_dict, particle_seq_pos = anneal_genome(contact_dict, num_models, particle_size,
                                                     general_calc_params, anneal_params,
