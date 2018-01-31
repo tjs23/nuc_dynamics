@@ -1134,8 +1134,8 @@ def particle_size_file_path(file_path, particle_size):
   
   n = file_path.rfind('.')
   size = int(particle_size/1000)
-  if n == len(out_file_path)-3: # DANGER: assumes that suffix is 3 chars and do not have .xyz without also .n3d/.pdb
-    file_path = '%s_%d.%s' % (file_path[:-4], size, out_file_path[-3:])
+  if n == len(file_path)-3: # DANGER: assumes that suffix is 3 chars and do not have .xyz without also .n3d/.pdb
+    file_path = '%s_%d.%s' % (file_path[:-4], size, file_path[-3:])
   else:
     file_path = '%s_%d' % (file_path, size)
     
