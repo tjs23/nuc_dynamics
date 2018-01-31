@@ -1032,7 +1032,7 @@ def align_coord_models(coord_models, n_iter=1, dist_scale=True):
 
   coord_models = np.array(coord_models)
   n_models, n_coords = coord_models.shape[:2]
-  
+      
   if dist_scale is True:
     init_dist_scale = 0.0
   else:
@@ -1095,7 +1095,7 @@ def align_chromo_coords(coords_dict, seq_pos_dict):
 
   return coords_dict
   
-def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, particle_size):
+def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, particle_size, num_models):
   
   # Save final coords as N3D or PDB format file
   
@@ -1104,7 +1104,8 @@ def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, part
   for chromo in coords_dict:
     coords_dict_scaled[chromo] = coords_dict[chromo] / bead_size
   
-  coords_dict_scaled = align_chromo_coords(coords_dict_scaled, particle_seq_pos)
+  if num_models > 1:
+    coords_dict_scaled = align_chromo_coords(coords_dict_scaled, particle_seq_pos)
     
   if out_format == PDB:
     if not out_file_path.endswith(PDB):
@@ -1199,7 +1200,7 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
  
       if save_intermediate and stage < len(particle_sizes)-1:
         file_path = particle_size_file_path(out_file_path, particle_size)
-        export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size)
+        export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size, num_models)
         
       # Next stage based on previous stage's 3D coords
       # and their respective seq. positions
@@ -1208,7 +1209,7 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
 
   # Save final coords
   file_path = particle_size_file_path(out_file_path, particle_size)
-  export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size)
+  export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size, num_models)
 
 
 def test_imports(gui=False):
