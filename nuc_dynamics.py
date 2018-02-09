@@ -339,6 +339,235 @@ def remove_homologous_pairs(contact_dict):
   return dict(new_contacts)
 
 
+DEFAULT_DISAMBIG_MIN = 3
+DEFAULT_DISAMBIG_FRAC = 0.02
+
+def resolve_homolog_ambiguous(contact_dict, min_disambig=DEFAULT_DISAMBIG_MIN, frac_disambig=DEFAULT_DISAMBIG_FRAC):
+
+  from collections import defaultdict
+
+  group_sizes = defaultdict(int)
+  chromo_pair_groups = defaultdict(set)
+
+  # Consider all trans chromosome pairs
+  # If the pair has fewer than min_disambig unambigous contacts it can have no homologous chromosome ambigous contacts
+  # This filtering is only for homologous chromosome ambiguity, not positional ambiguity
+
+  # Fetch the sizes of all ambiguity groups and which group goes with which chromo pair
+  for chr_a in contact_dict:  
+    for chr_b in contact_dict[chr_a]:    
+      contacts = contact_dict[chr_a][chr_b].T
+
+      for contact in contacts:
+        ambig_group = contact['ambiguity']
+        group_sizes[ambig_group] += 1
+
+        if chr_a > chr_b:
+          chr_a, chr_b = chr_b, chr_a
+
+        chromo_key = (chr_a, chr_b)
+        chromo_pair_groups[chromo_key].add(ambig_group)
+
+  n_groups = len(group_sizes)
+
+  # Count total unambiguous groups for each chromo pair
+  pair_stats = {}
+  unambig_fracs = []
+  unambig_counts = []
+  for chromo_key in chromo_pair_groups:
+    pair_groups = chromo_pair_groups[chromo_key]
+    n_unambig = 0
+
+    for ambig_group in pair_groups:
+      count = group_sizes[ambig_group]
+
+      if count == 1:
+        n_unambig += 1
+
+    frac_unambig = n_unambig/float(len(pair_groups))
+
+    if 0.0 < frac_unambig < 1.0:
+      unambig_counts.append(n_unambig)
+      unambig_fracs.append(frac_unambig)
+
+    pair_stats[chromo_key] = (n_unambig, frac_unambig)
+
+  # Calculate threshold statistic and excluded pairs
+
+  p90 = np.percentile(unambig_counts, [90.0])[0] # Threshold to seek only chromo pairs where counts are high
+  median_frac = np.median([unambig_fracs[i] for i, v in enumerate(unambig_counts) if v >= p90]) # An estimate of the average unambiguous proportion
+  non_contact_chromos = set()
+
+  for chromo_key in pair_stats:
+    n_unambig, frac_unambig = pair_stats[chromo_key]
+    chr_a, chr_b = chromo_key
+
+    if (n_unambig < min_disambig) or (frac_unambig < (frac_disambig * median_frac)):
+      chr_a, chr_b = chromo_key
+
+      if chr_a != chr_b:
+        non_contact_chromos.add(chromo_key)
+
+  new_contact_dict = defaultdict(dict)
+
+  for chr_a in contact_dict:  
+    for chr_b in contact_dict[chr_a]:    
+      contacts = contact_dict[chr_a][chr_b].T
+
+      contacts_new = []
+      for contact in contacts:
+        ambig_group = contact['ambiguity']
+        group_size = group_sizes[ambig_group]
+
+        if chr_a > chr_b:
+          chr_a, chr_b = chr_b, chr_a
+
+        chromo_key = (chr_a, chr_b)
+        if chromo_key in non_contact_chromos:
+          if group_size == 1: # Keep unambiguous for excluded pairs unless homologs
+            not_homolog = chr_a.split('.')[0] != chr_b.split('.')[0]
+
+            if not_homolog:
+              contacts_new.append(contact)
+        else:
+          contacts_new.append(contact)
+
+      if contacts_new:
+        contacts = np.array(contacts_new, dtype=Contact)
+        new_contact_dict[chr_a][chr_b] = np.array(contacts, dtype= Contact)
+
+  return new_contact_dict
+  
+
+def resolve_3d_ambiguous(contact_dict, seq_pos_dict, coords_dict, percentile_threshold=98.0, min_bead_sep=3):
+  
+  from collections import defaultdict
+  
+  ambig_groups = defaultdict(list)
+  
+  contact_pos = defaultdict(list)
+  
+  for chr_a in contact_dict:
+    if chr_a not in seq_pos_dict:
+      continue
+  
+    for chr_b in contact_dict[chr_a]:
+      if chr_b not in seq_pos_dict:
+        continue
+    
+      contacts = contact_dict[chr_a][chr_b].T
+
+      for contact in contacts:
+        pos_a, pos_b = contact['pos']
+        ambig_group = contact['ambiguity']
+        # None vals below will be filled with structure distances and bead separations
+        ambig_groups[ambig_group].append([chr_a, pos_a, chr_b, pos_b, None, None])
+        contact_pos[chr_a].append(pos_a)
+        contact_pos[chr_b].append(pos_b)
+        
+  ambig_groups = {g:ambig_groups[g] for g in ambig_groups if len(ambig_groups[g]) > 1}
+
+  msg = 'Get contacts particle indices'
+  print(msg)
+  
+  pos_idx = {}
+  
+  for chromo in contact_pos:
+    if chromo in coords_dict:
+      pos_idx[chromo] = cps = {}
+ 
+      seq_pos = seq_pos_dict[chromo]
+      j_max = len(seq_pos)-1
+      idx = np.searchsorted(seq_pos, contact_pos[chromo], side='right')
+ 
+      for i, pos in enumerate(contact_pos[chromo]):
+        j = min(j_max, idx[i])
+        cps[pos] = j
+  
+  msg = 'Get distances'
+  print(msg)
+  
+  closest_nz = []
+  min_dists = {}
+  min_seps = {}
+  
+  for ambig_group in ambig_groups:
+    dists = []
+    bead_seps = []
+    
+    for vals in ambig_groups[ambig_group]:
+      chr_a, pos_a, chr_b, pos_b, null, null2 = vals  
+      
+      coords_a = coords_dict[chr_a]
+      coords_b = coords_dict[chr_b]
+      
+      i = pos_idx[chr_a][pos_a]
+      j = pos_idx[chr_b][pos_b]
+      
+      deltas = coords_a[:,i] - coords_b[:,j]
+      dists2 = (deltas * deltas).sum(axis=1)
+      
+      dist = np.sqrt(dists2.mean())
+ 
+      dists.append(dist)
+      
+      if chr_a == chr_b:
+        bead_sep = abs(j-i)
+      else:
+        bead_sep = 99999 # Just something huge for trans
+      
+      bead_seps.append(bead_sep)
+      
+      vals[4] = dist
+      vals[5] = bead_sep
+    
+    min_sep = min(bead_seps)
+    min_seps[ambig_group] = min_sep
+      
+    min_dist = min(dists)
+    min_dists[ambig_group] = min_dist
+    if min_dist > 0.0:
+      closest_nz.append(min_dist)
+  
+  dist_thresh = np.percentile(closest_nz, [percentile_threshold])[0]
+  
+  msg = 'Filter ambiguity groups. Threshold = %.2f' % dist_thresh
+  print(msg)
+  
+  remove = set()
+  
+  for ambig_group in ambig_groups:
+    min_dist = min_dists[ambig_group]
+    min_sep = min_seps[ambig_group]
+
+    for chr_a, pos_a, chr_b, pos_b, dist, bead_sep in ambig_groups[ambig_group]:
+      if (min_dist == 0) and (chr_a != chr_b):
+        remove.add((ambig_group, chr_a, pos_a, chr_b, pos_b))
+        continue
+      
+      if (min_sep < min_bead_sep) and (chr_a != chr_b):
+        remove.add((ambig_group, chr_a, pos_a, chr_b, pos_b))
+        continue
+        
+      if dist != min_dist:
+        if dist > min_dist + dist_thresh/2:
+          remove.add((ambig_group, chr_a, pos_a, chr_b, pos_b))
+          continue
+          
+        if dist > dist_thresh:
+          remove.add((ambig_group, chr_a, pos_a, chr_b, pos_b))
+          continue
+
+  new_contact_dict = defaultdict(dict)
+
+  for (chromoA, chromoB), contacts in flatten_dict(contact_dict).items():
+    contacts = [c for c in contacts if (c['ambiguity'], chromoA, c['pos'][0], chromoB, c['pos'][1]) not in remove]
+    if contacts:
+      new_contact_dict[chromoA][chromoB] = np.array(contacts, dtype= Contact)
+  
+  return dict(new_contact_dict)
+
+
 def between(x, a, b):
   return (a < x) & (x < b)
 
@@ -1074,6 +1303,7 @@ def align_coord_models(coord_models, n_iter=1, dist_scale=True):
   
   return coord_models, model_rmsds, particle_rmsds
   
+  
 def align_chromo_coords(coords_dict, seq_pos_dict):
     
   coord_models = None
@@ -1094,6 +1324,7 @@ def align_chromo_coords(coords_dict, seq_pos_dict):
     n += m
 
   return coords_dict
+  
   
 def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, particle_size, num_models):
   
@@ -1146,7 +1377,8 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
                           particle_sizes, num_models=5, isolation_threshold=2e6,
                           out_format=N3D, num_cpu=MAX_CORES,
                           start_coords_path=None, save_intermediate=False,
-                          remove_ambig_contacts=False, remove_homo_pairs=False):
+                          remove_ambig_contacts=False, remove_homo_pairs=False,
+                          resolve_homo_ambig=False, resolve_3d_ambig=False):
 
   from time import time
 
@@ -1162,6 +1394,10 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
     contact_dict = remove_homologous_pairs(contact_dict)
     print('Total number of contacts after removing homologous pairs = %d' % contact_count(contact_dict))
 
+  if resolve_homo_ambig:
+    contact_dict = resolve_homolog_ambiguous(contact_dict)
+    print('Total number of contacts after removing homologous ambiguity = %d' % contact_count(contact_dict))
+    
   # Only use contacts which are supported by others nearby in sequence, in the initial instance
   contact_dict = remove_isolated_contacts(contact_dict, threshold=isolation_threshold)
 
@@ -1180,32 +1416,38 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
     
   for stage, particle_size in enumerate(particle_sizes):
  
-      print("Running structure caculation stage %d (%d kb)" % (stage+1, (particle_size/1e3)))
- 
-      # Can remove large violations (noise contacts inconsistent with structure)
-      # once we have a reasonable resolution structure
-      bead_size = determine_bead_size(particle_size)
+    print("Running structure calculation stage %d (%d kb)" % (stage+1, (particle_size/1e3)))
+
+    # Can remove large violations (noise contacts inconsistent with structure)
+    # once we have a reasonable resolution structure
+    bead_size = determine_bead_size(particle_size)
+    
+    if resolve_3d_ambig:
+      stage_contact_dict = resolve_3d_ambiguous(contact_dict, particle_seq_pos, start_coords)
+      print('Total number of contacts after removing structural homologous ambiguity = %d' % contact_count(stage_contact_dict))
+    else:
+      stage_contact_dict = contact_dict
+    
+    if stage > 0:
+      if particle_size < 0.25e6:
+        stage_contact_dict = remove_violated_contacts(stage_contact_dict, start_coords, particle_seq_pos,
+                                                  threshold=5.0*bead_size)
+      elif particle_size < 0.5e6:
+        stage_contact_dict = remove_violated_contacts(stage_contact_dict, start_coords, particle_seq_pos,
+                                                  threshold=6.0*bead_size)
+
+    coords_dict, particle_seq_pos = anneal_genome(stage_contact_dict, num_models, particle_size,
+                                                  general_calc_params, anneal_params,
+                                                  prev_seq_pos, start_coords, num_cpu)
+
+    if save_intermediate and stage < len(particle_sizes)-1:
+      file_path = particle_size_file_path(out_file_path, particle_size)
+      export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size, num_models)
       
-      if stage > 0:
-        if particle_size < 0.25e6:
-            contact_dict = remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
-                                                    threshold=5.0*bead_size)
-        elif particle_size < 0.5e6:
-            contact_dict = remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
-                                                    threshold=6.0*bead_size)
- 
-      coords_dict, particle_seq_pos = anneal_genome(contact_dict, num_models, particle_size,
-                                                    general_calc_params, anneal_params,
-                                                    prev_seq_pos, start_coords, num_cpu)
- 
-      if save_intermediate and stage < len(particle_sizes)-1:
-        file_path = particle_size_file_path(out_file_path, particle_size)
-        export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size, num_models)
-        
-      # Next stage based on previous stage's 3D coords
-      # and their respective seq. positions
-      start_coords = coords_dict
-      prev_seq_pos = particle_seq_pos
+    # Next stage based on previous stage's 3D coords
+    # and their respective seq. positions
+    start_coords = coords_dict
+    prev_seq_pos = particle_seq_pos
 
   # Save final coords
   file_path = particle_size_file_path(out_file_path, particle_size)
@@ -1326,6 +1568,12 @@ if __name__ == '__main__':
   arg_parse.add_argument('-remove_homo_pairs', default=False, action='store_true',
                          help='Remove all contacts between homologous pairs (e.g. chr11.a to chr11.b).')
 
+  arg_parse.add_argument('-resolve_homo_ambig', default=False, action='store_true',
+                         help='Non-structural filtering for homologous chromosome ambiguity.')
+
+  arg_parse.add_argument('-resolve_3d_ambig', default=False, action='store_true',
+                         help='Resolve 3d ambiguous contacts so that trans ones removed if cis too close or if too far away.')
+
   arg_parse.add_argument('-m', default=1, metavar='NUM_MODELS',
                          type=int, help='Number of alternative conformations to generate from repeat calculations with different random starting coordinates: Default: 1')
 
@@ -1410,6 +1658,8 @@ if __name__ == '__main__':
   start_coords_path = args['start_coords_path']
   remove_ambig_contacts = args['remove_ambig_contacts']
   remove_homo_pairs = args['remove_homo_pairs']
+  resolve_homo_ambig = args['resolve_homo_ambig']
+  resolve_3d_ambig = args['resolve_3d_ambig']
   
   if out_format not in FORMATS:
     critical('Output file format must be one of: %s' % ', '.join(FORMATS))
@@ -1469,7 +1719,8 @@ if __name__ == '__main__':
   
   calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
                         particle_sizes, num_models, isolation_threshold, out_format, num_cpu,
-                        start_coords_path, save_intermediate, remove_ambig_contacts, remove_homo_pairs)
+                        start_coords_path, save_intermediate, remove_ambig_contacts,
+                        remove_homo_pairs, resolve_homo_ambig, resolve_3d_ambig)
 
 # TO DO
 # -----
