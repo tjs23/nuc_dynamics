@@ -15,7 +15,7 @@ MAX_CORES = multiprocessing.cpu_count()
 
 Restraint = np.dtype([('indices', 'int32', 2), ('dists', 'float64', 2),
                       ('ambiguity', 'int32'),  ('weight', 'float64')])
-Contact = np.dtype([('pos', 'uint32', 2), ('ambiguity', 'int32')])
+Contact = np.dtype([('pos', 'uint32', 2), ('ambiguity', 'int32'), ('number', 'uint32')])
 
 def warn(msg, prefix='WARNING'):
 
@@ -100,9 +100,10 @@ def load_ncc_file(file_path):
   contact_dict = {}
 
   with f_open(file_path) as file_obj:
+    n = 0
     for line in file_obj:
       if line.startswith('#'):
-          continue
+        continue
       chr_a, f_start_a, f_end_a, start_a, end_a, strand_a, chr_b, f_start_b, f_end_b, start_b, end_b, strand_b, ambig_group, pair_id, swap_pair = line.split()
 
       pos_a = int(f_start_a if strand_a == '+' else f_end_a)
@@ -118,12 +119,45 @@ def load_ncc_file(file_path):
       if chr_b not in contact_dict[chr_a]:
         contact_dict[chr_a][chr_b] = []
 
-      contact_dict[chr_a][chr_b].append(((pos_a, pos_b), int(ambig_group)))
+      contact_dict[chr_a][chr_b].append(((pos_a, pos_b), int(ambig_group), n))
+      n += 1
 
   for chr_a in contact_dict:
     for chr_b in contact_dict[chr_a]:
       contact_dict[chr_a][chr_b] = array(contact_dict[chr_a][chr_b], dtype=Contact)
   return contact_dict
+
+
+def save_ncc_file(file_path_in, name, contact_dict, particle_size=None):
+
+  if particle_size is not None:
+    name = '%s_%d' % (name, int(particle_size/1000))
+    
+  if file_path_in.endswith('.gz'):
+    import gzip
+    f_open = gzip.open
+    prefix = file_path_in[:-3]
+  else:
+    f_open = open
+    prefix = file_path_in
+
+  file_path_out ='%s_%s.ncc' % (prefix[:-4], name)
+  
+  numbers = set()
+  for chr_a in contact_dict:
+    for chr_b in contact_dict[chr_a]:
+      numbers |= set(contact_dict[chr_a][chr_b]['number'])
+      
+  with f_open(file_path_in) as file_obj_in:
+    with open(file_path_out, 'w') as file_obj_out:
+      n = 0
+      for line in file_obj_in:
+        if line.startswith('#'):
+          file_obj_out.write(line)
+        else:
+          if n in numbers:
+            file_obj_out.write(line)
+          n += 1
   
   
 def calc_limits(contact_dict):
@@ -1389,14 +1423,20 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
   if remove_ambig_contacts:
     contact_dict = remove_ambiguous_contacts(contact_dict)
     print('Total number of contacts after removing ambiguous ones = %d' % contact_count(contact_dict))
+    if save_intermediate:
+      save_ncc_file(ncc_file_path, 'remove_ambig', contact_dict)
 
   if remove_homo_pairs:
     contact_dict = remove_homologous_pairs(contact_dict)
     print('Total number of contacts after removing homologous pairs = %d' % contact_count(contact_dict))
+    if save_intermediate:
+      save_ncc_file(ncc_file_path, 'remove_homo', contact_dict)
 
   if resolve_homo_ambig:
     contact_dict = resolve_homolog_ambiguous(contact_dict)
     print('Total number of contacts after removing homologous ambiguity = %d' % contact_count(contact_dict))
+    if save_intermediate:
+      save_ncc_file(ncc_file_path, 'resolve_homo', contact_dict)
     
   # Only use contacts which are supported by others nearby in sequence, in the initial instance
   contact_dict = remove_isolated_contacts(contact_dict, threshold=isolation_threshold)
@@ -1425,6 +1465,8 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
     if resolve_3d_ambig:
       stage_contact_dict = resolve_3d_ambiguous(contact_dict, prev_seq_pos, start_coords)
       print('Total number of contacts after removing structural homologous ambiguity = %d' % contact_count(stage_contact_dict))
+      if save_intermediate:
+        save_ncc_file(ncc_file_path, 'resolve_3d', contact_dict, particle_size)
     else:
       stage_contact_dict = contact_dict
     
@@ -1432,9 +1474,13 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
       if particle_size < 0.25e6:
         stage_contact_dict = remove_violated_contacts(stage_contact_dict, start_coords, prev_seq_pos,
                                                   threshold=5.0*bead_size)
+        if save_intermediate:
+          save_ncc_file(ncc_file_path, 'remove_viol', contact_dict, particle_size)
       elif particle_size < 0.5e6:
         stage_contact_dict = remove_violated_contacts(stage_contact_dict, start_coords, prev_seq_pos,
                                                   threshold=6.0*bead_size)
+        if save_intermediate:
+          save_ncc_file(ncc_file_path, 'remove_viol', contact_dict, particle_size)
 
     coords_dict, particle_seq_pos = anneal_genome(stage_contact_dict, num_models, particle_size,
                                                   general_calc_params, anneal_params,
