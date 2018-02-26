@@ -1458,6 +1458,7 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
  
     print("Running structure calculation stage %d (%d kb)" % (stage+1, (particle_size/1e3)))
     
+    anneal_params['temp_steps'] = anneal_params['temp_steps_by_stage'][stage]
     anneal_params['dynamics_steps'] = anneal_params['dynamics_steps_by_stage'][stage]
 
     # Can remove large violations (noise contacts inconsistent with structure)
@@ -1667,10 +1668,13 @@ if __name__ == '__main__':
   arg_parse.add_argument('-temps', default=500, metavar='NUM_STEPS',
                          type=int, help='Number of temperature steps in annealing protocol between start and end temperature. Default: 500')
 
+  arg_parse.add_argument('-temps_by_stage', default=[], metavar='NUM_STEPS', nargs='+',
+                         type=int, help='Number of temperature steps (specified by stage) in annealing protocol between start and end temperature. If this is specified then -temps argument ignored.')
+
   arg_parse.add_argument('-dyns', default=100, metavar='NUM_STEPS',
                          type=int, help='Number of particle dynamics steps to apply at each temperature in the annealing protocol. Default: 100')
 
-  arg_parse.add_argument('-dyns_by_stage', default=[], metavar='NUM_STEPS_BY_STAGE', nargs='+',
+  arg_parse.add_argument('-dyns_by_stage', default=[], metavar='NUM_STEPS', nargs='+',
                          type=int, help='Number of particle dynamics steps to apply (specified by stage) at each temperature in the annealing protocol. If this is specified then -dyns argument ignored.')
 
   arg_parse.add_argument('-time_step', default=0.001, metavar='TIME_DELTA',
@@ -1702,6 +1706,7 @@ if __name__ == '__main__':
   temp_start = args['hot']
   temp_end = args['cold']
   temp_steps = args['temps']
+  temp_steps_by_stage = args['temps_by_stage']
   dynamics_steps = args['dyns']
   dynamics_steps_by_stage = args['dyns_by_stage']
   time_step = args['time_step']
@@ -1749,6 +1754,15 @@ if __name__ == '__main__':
         if val >= 0.0:
           critical('%s must be negative' % name)
      
+  if temp_steps_by_stage:
+    for ts in temp_steps_by_stage:
+      if ts <= 0.0:
+        critical('temp steps by stage must all be positive')
+    if len(temp_steps_by_stage) != len(particle_sizes):
+      critical('temp steps by stage must be of same length as particle sizes')
+  else:
+    temp_steps_by_stage = len(particle_sizes) * [temp_steps]
+        
   if dynamics_steps_by_stage:
     for ds in dynamics_steps_by_stage:
       if ds <= 0.0:
@@ -1773,7 +1787,7 @@ if __name__ == '__main__':
                          'random_seed':random_seed,
                          'random_radius':random_radius}
 
-  anneal_params = {'temp_start':temp_start, 'temp_end':temp_end, 'temp_steps':temp_steps,
+  anneal_params = {'temp_start':temp_start, 'temp_end':temp_end, 'temp_steps_by_stage':temp_steps_by_stage,
                    'dynamics_steps_by_stage':dynamics_steps_by_stage, 'time_step':time_step}
   
   isolation_threshold *= 1e6
