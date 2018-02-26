@@ -1457,6 +1457,8 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
   for stage, particle_size in enumerate(particle_sizes):
  
     print("Running structure calculation stage %d (%d kb)" % (stage+1, (particle_size/1e3)))
+    
+    anneal_params['dynamics_steps'] = anneal_params['dynamics_steps_by_stage'][stage]
 
     # Can remove large violations (noise contacts inconsistent with structure)
     # once we have a reasonable resolution structure
@@ -1668,6 +1670,9 @@ if __name__ == '__main__':
   arg_parse.add_argument('-dyns', default=100, metavar='NUM_STEPS',
                          type=int, help='Number of particle dynamics steps to apply at each temperature in the annealing protocol. Default: 100')
 
+  arg_parse.add_argument('-dyns_by_stage', default=[], metavar='NUM_STEPS_BY_STAGE', nargs='+',
+                         type=int, help='Number of particle dynamics steps to apply (specified by stage) at each temperature in the annealing protocol. If this is specified then -dyns argument ignored.')
+
   arg_parse.add_argument('-time_step', default=0.001, metavar='TIME_DELTA',
                          type=float, help='Simulation time step between re-calculation of particle velocities. Default: 0.001')
   
@@ -1698,6 +1703,7 @@ if __name__ == '__main__':
   temp_end = args['cold']
   temp_steps = args['temps']
   dynamics_steps = args['dyns']
+  dynamics_steps_by_stage = args['dyns_by_stage']
   time_step = args['time_step']
   isolation_threshold = args['iso']
   save_intermediate = args['save_intermediate']
@@ -1743,6 +1749,15 @@ if __name__ == '__main__':
         if val >= 0.0:
           critical('%s must be negative' % name)
      
+  if dynamics_steps_by_stage:
+    for ds in dynamics_steps_by_stage:
+      if ds <= 0.0:
+        critical('dynamic steps by stage must all be positive')
+    if len(dynamics_steps_by_stage) != len(particle_sizes):
+      critical('dynamic steps by stage must be of same length as particle sizes')
+  else:
+    dynamics_steps_by_stage = len(particle_sizes) * [dynamics_steps]
+        
   contact_dist_lower, contact_dist_upper = sorted([contact_dist_lower, contact_dist_upper])
   backbone_dist_lower, backbone_dist_upper = sorted([backbone_dist_lower, backbone_dist_upper])
   temp_end, temp_start = sorted([temp_end, temp_start])
@@ -1759,7 +1774,7 @@ if __name__ == '__main__':
                          'random_radius':random_radius}
 
   anneal_params = {'temp_start':temp_start, 'temp_end':temp_end, 'temp_steps':temp_steps,
-                   'dynamics_steps':dynamics_steps, 'time_step':time_step}
+                   'dynamics_steps_by_stage':dynamics_steps_by_stage, 'time_step':time_step}
   
   isolation_threshold *= 1e6
   
