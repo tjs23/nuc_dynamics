@@ -606,7 +606,7 @@ def between(x, a, b):
   return (a < x) & (x < b)
 
 
-def remove_isolated_contacts(contact_dict, threshold=int(2e6), pos_error=100, ignore=()):
+def remove_isolated_contacts(contact_dict, threshold_cis=int(2e6), threshold_trans=int(10e6), pos_error=100, ignore=()):
   """
   Select only contacts which are within a given sequence separation of another
   contact, for the same chromosome pair
@@ -616,6 +616,10 @@ def remove_isolated_contacts(contact_dict, threshold=int(2e6), pos_error=100, ig
   new_contacts = defaultdict(dict)
 
   for (chromoA, chromoB), contacts in flatten_dict(contact_dict).items():
+    if chromoA == chromoB:
+      threshold = threshold_cis
+    else:
+      threshold = threshold_trans
     # positions is N x 2 matrix, where there are N contacts (and the 2 is because of pos_a, pos_b)
     positions = contacts['pos'].astype('int32')
     if chromoA in ignore or chromoB in ignore:
@@ -1408,8 +1412,8 @@ def particle_size_file_path(file_path, particle_size):
   return file_path
 
 def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, anneal_params,
-                          particle_sizes, num_models=5, isolation_threshold=2e6,
-                          out_format=N3D, num_cpu=MAX_CORES,
+                          particle_sizes, num_models=5, isolation_threshold_cis=int(2e6),
+                          isolation_threshold_trans=int(10e6), out_format=N3D, num_cpu=MAX_CORES,
                           start_coords_path=None, save_intermediate=False,
                           remove_ambig_contacts=False, remove_homo_pairs=False,
                           resolve_homo_ambig=False, resolve_3d_ambig=False):
@@ -1439,7 +1443,8 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
       save_ncc_file(ncc_file_path, 'resolve_homo', contact_dict)
     
   # Only use contacts which are supported by others nearby in sequence, in the initial instance
-  contact_dict = remove_isolated_contacts(contact_dict, threshold=isolation_threshold)
+  contact_dict = remove_isolated_contacts(contact_dict, threshold_cis=isolation_threshold_cis,
+                                          threshold_trans=isolation_threshold_trans)
 
   # Initial coords will be random
   start_coords = None
@@ -1578,10 +1583,12 @@ def demo_calc_genome_structure():
   
   # Contacts must be clustered with another within this separation threshold
   # (at both ends) to be considered supported, i.e. not isolated
-  isolation_threshold=2e6
+  isolation_threshold_cis = int(2e6)
+  isolation_threshold_trans = int(10e6)
   
   calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
-                        particle_sizes, num_models, isolation_threshold, out_format='pdb')
+                        particle_sizes, num_models, isolation_threshold_cis,
+                        isolation_threadhold_trans, out_format='pdb')
 
     
 test_imports()
@@ -1635,8 +1642,11 @@ if __name__ == '__main__':
   arg_parse.add_argument('-cpu', metavar='NUM_CPU', type=int, default=MAX_CORES,
                          help='Number of parallel CPU cores for calculating different coordinate models. Limited by the number of models (-m) but otherwise defaults to all available CPU cores (%d)' % MAX_CORES)
 
-  arg_parse.add_argument('-iso', default=2.0, metavar='Mb_SIZE', type=float,
-                         help='Contacts must be near another, within this (Mb) separation threshold (at both ends) to be considered supported: Default 2.0')
+  arg_parse.add_argument('-iso_cis', default=2, metavar='Mb_SIZE', type=int,
+                         help='Cis contacts must be near another, within this (Mb) separation threshold (at both ends) to be considered supported: Default 2.0')
+
+  arg_parse.add_argument('-iso_trans', default=10, metavar='Mb_SIZE', type=int,
+                         help='Trans contacts must be near another, within this (Mb) separation threshold (at both ends) to be considered supported: Default 10.0')
 
   arg_parse.add_argument('-pow', default=-0.33, metavar='FLOAT',
                          type=float, help='Distance power law for combining multiple Hi-C contacts between the same particles. Default: -0.33')
@@ -1710,7 +1720,8 @@ if __name__ == '__main__':
   dynamics_steps = args['dyns']
   dynamics_steps_by_stage = args['dyns_by_stage']
   time_step = args['time_step']
-  isolation_threshold = args['iso']
+  isolation_threshold_cis = args['iso_cis']
+  isolation_threshold_trans = args['iso_trans']
   save_intermediate = args['save_intermediate']
   start_coords_path = args['start_coords_path']
   remove_ambig_contacts = args['remove_ambig_contacts']
@@ -1721,19 +1732,20 @@ if __name__ == '__main__':
   if out_format not in FORMATS:
     critical('Output file format must be one of: %s' % ', '.join(FORMATS))
   
-  for val, name, sign in ((num_models,         'Number of conformational models', '+'),
-                          (dist_power_law,     'Distance power law', '-0'),
-                          (contact_dist_lower, 'Contact distance lower bound', '+'),
-                          (contact_dist_upper, 'Contact distance upper bound', '+'),
-                          (backbone_dist_lower,'Backbone distance lower bound', '+'),
-                          (backbone_dist_upper,'Backbone distance upper bound', '+'),
-                          (random_radius,      'Random-start radius', '+'),
-                          (temp_start,         'Annealing start temperature', '+'),
-                          (temp_end,           'Annealing end temperature', '+0'),
-                          (temp_steps,         'Number of annealing temperature steps', '+'),
-                          (dynamics_steps,     'Number of particle dynamics steps', '+'),
-                          (time_step,          'Particle dynamics time steps', '+'),
-                          (isolation_threshold,'Contact isolation threshold', '+0'),
+  for val, name, sign in ((num_models,               'Number of conformational models', '+'),
+                          (dist_power_law,           'Distance power law', '-0'),
+                          (contact_dist_lower,       'Contact distance lower bound', '+'),
+                          (contact_dist_upper,       'Contact distance upper bound', '+'),
+                          (backbone_dist_lower,      'Backbone distance lower bound', '+'),
+                          (backbone_dist_upper,      'Backbone distance upper bound', '+'),
+                          (random_radius,            'Random-start radius', '+'),
+                          (temp_start,               'Annealing start temperature', '+'),
+                          (temp_end,                 'Annealing end temperature', '+0'),
+                          (temp_steps,               'Number of annealing temperature steps', '+'),
+                          (dynamics_steps,           'Number of particle dynamics steps', '+'),
+                          (time_step,                'Particle dynamics time steps', '+'),
+                          (isolation_threshold_cis,  'Cis contact isolation threshold', '+0'),
+                          (isolation_threshold_trans,'Trans contact isolation threshold', '+0'),
                          ):
                           
     if '+' in sign:
@@ -1790,11 +1802,12 @@ if __name__ == '__main__':
   anneal_params = {'temp_start':temp_start, 'temp_end':temp_end, 'temp_steps_by_stage':temp_steps_by_stage,
                    'dynamics_steps_by_stage':dynamics_steps_by_stage, 'time_step':time_step}
   
-  isolation_threshold *= 1e6
+  isolation_threshold_cis *= int(1e6)
+  isolation_threshold_trans *= int(1e6)
   
   calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
-                        particle_sizes, num_models, isolation_threshold, out_format, num_cpu,
-                        start_coords_path, save_intermediate, remove_ambig_contacts,
+                        particle_sizes, num_models, isolation_threshold_cis, isolation_threshold_trans,
+                        out_format, num_cpu, start_coords_path, save_intermediate, remove_ambig_contacts,
                         remove_homo_pairs, resolve_homo_ambig, resolve_3d_ambig)
 
 # TO DO
