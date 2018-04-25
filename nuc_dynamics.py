@@ -1523,12 +1523,12 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
     ambig_offset = 0
     for chr_a in contact_dict:
       for chr_b in contact_dict[chr_a]:
-        ambig_offset = max(ambig_offset, max([contact.ambiguity for contact in contact_dict[chr_a][chr_b]]),
-                                         max([contact.number for contact in contact_dict[chr_a][chr_b]]))
-    t = numpy.power(10, numpy.floor(numpy.log10(ambig_offset+1)))
-    ambig_offset = int(t * numpy.ceil(ambig_offset / t))
+        ambig_offset = max(ambig_offset, max([contact[1] for contact in contact_dict[chr_a][chr_b]]),
+                                         max([contact[2] for contact in contact_dict[chr_a][chr_b]]))
+    t = np.power(10, np.floor(np.log10(ambig_offset+1)))
+    ambig_offset = int(t * np.ceil(ambig_offset / t))
     contact2_dict = load_ncc_file(ncc2_file_path, offset=ambig_offset)
-    info('Total number of secondary contacts = %d, offset = %d' % contact_count(contact2_dict, ambig_offset))
+    info('Total number of secondary contacts = %d, offset = %d' % (contact_count(contact2_dict), ambig_offset))
   
   if have_diploid:
     contact_dict = resolve_homolog_ambiguous(contact_dict)
@@ -1562,7 +1562,7 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
     info("Running structure calculation stage %d (%d kb)" % (stage+1, particle_size//1000))
  
     stage_contact_dict = contact_dict
-    if ncc2_file_path and particle_size <= ncc2_added_size:
+    if ncc2_file_path and particle_size <= ncc2_added_at_size:
       stage_contact_dict = merge_contact_dicts(stage_contact_dict, contact2_dict)
       info('Total number of contacts after merging = %d' % contact_count(stage_contact_dict))
     
