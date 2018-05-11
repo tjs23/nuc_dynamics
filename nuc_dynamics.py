@@ -1507,7 +1507,7 @@ def remove_violated_threshold(particle_size, bead_size):
 def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_calc_params, anneal_params,
                           particle_sizes, num_models=5, isolation_threshold_cis=int(2e6),
                           isolation_threshold_trans=int(10e6), out_format=N3D, num_cpu=MAX_CORES,
-                          start_coords_path=None, save_intermediate=False,
+                          start_coords_path=None, save_intermediate=False, save_intermediate_ncc=False,
                           have_diploid=False, ncc2_added_at_size=DEFAULT_NCC2_ADDED_SIZE,
                           struct_ambig_size=DEFAULT_STRUCT_AMBIG_SIZE, remove_models_size=DEFAULT_REMOVE_MODELS_SIZE):
                           #remove_ambig_contacts=False, remove_homo_pairs=False,
@@ -1533,13 +1533,13 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
   if have_diploid:
     contact_dict = resolve_homolog_ambiguous(contact_dict)
     info('Total number of contacts after removing homologous ambiguity = %d' % contact_count(contact_dict))
-    if save_intermediate:
+    if save_intermediate_ncc:
       save_ncc_file(ncc_file_path, 'resolve_homo', contact_dict, particle_size)
       
     if ncc2_file_path:
       contact2_dict = resolve_homolog_ambiguous(contact2_dict)
       info('Total number of secondary contacts after removing homologous ambiguity = %d' % contact_count(contact2_dict))
-      if save_intermediate:
+      if save_intermediate_ncc:
         save_ncc_file(ncc2_file_path, 'resolve_homo', contact2_dict, particle_size, ambig_offset)
   
 
@@ -1566,7 +1566,7 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
       stage_contact_dict = merge_contact_dicts(stage_contact_dict, contact2_dict)
       info('Total number of contacts after merging = %d' % contact_count(stage_contact_dict))
     
-    if save_intermediate:
+    if save_intermediate_ncc:
       save_ncc_file(ncc_file_path, 'remove_isol', stage_contact_dict, particle_size)
       if ncc2_file_path:
         save_ncc_file(ncc2_file_path, 'remove_isol', stage_contact_dict, particle_size, ambig_offset)
@@ -1588,7 +1588,7 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
       if have_diploid and particle_size <= struct_ambig_size:
         stage_contact_dict = resolve_3d_ambiguous(stage_contact_dict, prev_seq_pos, start_coords)
         info('Total number of contacts after removing structural homologous ambiguity = %d' % contact_count(stage_contact_dict))
-        if save_intermediate:
+        if save_intermediate_ncc:
           save_ncc_file(ncc_file_path, 'resolve_3d', stage_contact_dict, particle_size)
           if ncc2_file_path:
             save_ncc_file(ncc2_file_path, 'resolve_3d', stage_contact_dict, particle_size, ambig_offset)
@@ -1606,7 +1606,7 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
       stage_contact_dict = remove_violated_contacts(stage_contact_dict, start_coords, prev_seq_pos,
                                                     threshold=threshold)
       info('Total number of contacts after removing violated contacts = %d' % contact_count(stage_contact_dict))
-      if save_intermediate:
+      if save_intermediate_ncc:
         save_ncc_file(ncc_file_path, 'remove_viol', stage_contact_dict, particle_size)
         if ncc2_file_path:
           save_ncc_file(ncc2_file_path, 'remove_viol', stage_contact_dict, particle_size, ambig_offset)
@@ -1745,6 +1745,9 @@ if __name__ == '__main__':
   arg_parse.add_argument('-save_intermediate', default=False, action='store_true',
                          help='Write out intermediate coordinate files.')
 
+  arg_parse.add_argument('-save_intermediate_ncc', default=False, action='store_true',
+                         help='Write out intermediate NCC files.')
+
   arg_parse.add_argument('-start_coords_path', metavar='N3D_FILE',
                          help='Initial 3D coordinates in N3D format. If set this will override -m flag.')
 
@@ -1860,6 +1863,7 @@ if __name__ == '__main__':
   isolation_threshold_cis = args['iso_cis']
   isolation_threshold_trans = args['iso_trans']
   save_intermediate = args['save_intermediate']
+  save_intermediate_ncc = args['save_intermediate_ncc']
   start_coords_path = args['start_coords_path']
   have_diploid = args['diploid']
   ncc2_added_at_size = args['ncc2_added_at_size']
@@ -1950,7 +1954,7 @@ if __name__ == '__main__':
   
   calc_genome_structure(ncc_file_path, ncc2_file_path, save_path, general_calc_params, anneal_params,
                         particle_sizes, num_models, isolation_threshold_cis, isolation_threshold_trans,
-                        out_format, num_cpu, start_coords_path, save_intermediate,
+                        out_format, num_cpu, start_coords_path, save_intermediate, save_intermediate_ncc,
                         have_diploid, ncc2_added_at_size, struct_ambig_size, remove_models_size)
                         #remove_ambig_contacts, remove_homo_pairs, resolve_homo_ambig, resolve_3d_ambig)
 
