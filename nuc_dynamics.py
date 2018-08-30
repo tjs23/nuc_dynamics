@@ -1582,10 +1582,12 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
       
       if particle_size <= remove_models_size and not removed_models:
         start_coords = remove_models(start_coords, prev_seq_pos)
+        chromo = next(iter(start_coords)) # picks out arbitrary chromosome
+        num_models = len(start_coords[chromo])
         info('Removed models')
         removed_models = True
         
-      if have_diploid and particle_size <= struct_ambig_size:
+      if (have_diploid or ncc2_file_path) and particle_size <= struct_ambig_size:
         stage_contact_dict = resolve_3d_ambiguous(stage_contact_dict, prev_seq_pos, start_coords)
         info('Total number of contacts after removing structural homologous ambiguity = %d' % contact_count(stage_contact_dict))
         if save_intermediate_ncc:
@@ -1628,7 +1630,7 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
   file_path = particle_size_file_path(out_file_path, particle_size)
   export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size, num_models)
 
-  if have_diploid and particle_size <= struct_ambig_size:
+  if (have_diploid or ncc2_file_path) and particle_size <= struct_ambig_size:
     contact_dict = resolve_3d_ambiguous(contact_dict, particle_seq_pos, coords_dict)
     info('Final total number of contacts after removing structural homologous ambiguity = %d' % contact_count(contact_dict))
     if save_intermediate_ncc:
