@@ -15,6 +15,7 @@ class NucCythonError(Exception):
     Exception.__init__(self, err)
 
 
+"""
 cdef int getRepulsionList(ndarray[int,   ndim=2] repList,
                           ndarray[double, ndim=2] coords,
                           ndarray[double, ndim=1] repDists,
@@ -63,9 +64,348 @@ cdef int getRepulsionList(ndarray[int,   ndim=2] repList,
       n += 1
 
   return n
+"""
+
+cdef getRepulsionList(ndarray[int,   ndim=2] rep_list,
+                          ndarray[double, ndim=2] coords,
+                          ndarray[double, ndim=3] regions_1,
+                          ndarray[double, ndim=4] regions_2,
+                          ndarray[int, ndim=1] idx_1,
+                          ndarray[int, ndim=2] idx_2,
+                          int s1, int s2, int nCoords, int nRepMax,
+                          #double rep_dist, ndarray[double, ndim=1] radii,
+                          ndarray[double, ndim=1] rep_dists, ndarray[double, ndim=1] radii,
+                          double max_radius):
+  
+  cdef int i, j, k, i1, i2, j1, j2, n2
+  cdef int a, b, a0, b0, a1, b1, a2, b2, p0, p, q0, q
+  
+  cdef int n  = 0  # Num close pairs
+  cdef int n1 = 0  # Num primary regions
+  cdef int s3 = s2/s1
+  cdef int n_rep_found = 0
+  
+  cdef double dx, dy, dz, d2
+  cdef double d_lim
+  cdef double d_lim2
+  #cdef double rep_dist2 = rep_dist + max_radius
+  cdef double rep_dist2
+
+  if nCoords < s2: # No split
+    for i in range(nCoords-2):
+      for j in range(i+2, nCoords):
+        #d_lim = rep_dist + radii[i] + radii[j]
+        d_lim = rep_dists[i] + radii[i] + rep_dists[j] + radii[j]
+ 
+        dx = coords[i,0] - coords[j,0]
+        if abs(dx) > d_lim:
+          continue
+
+        dy = coords[i,1] - coords[j,1]
+        if abs(dy) > d_lim:
+          continue
+
+        dz = coords[i,2] - coords[j,2]
+        if abs(dz) > d_lim:
+          continue
+
+        d2 = dx*dx + dy*dy + dz*dz
+ 
+        d_lim2 = d_lim * d_lim
+        if d2 > d_lim2:
+          continue
+        
+        if n < nRepMax:
+          rep_list[n,0] = i
+          rep_list[n,1] = j
+          n += 1
+        
+        n_rep_found += 1
+        
+        
+  elif nCoords < s1 * s2: # Single split
+    # Calc bounding X regions
+
+    n1 = 0 
+    for i in range(0, nCoords, s1): 
+
+      rep_dist2 = 2*rep_dists[i] + max_radius
+      
+      for k in range(3):
+        regions_1[n1,k,0] = coords[i,k]
+        regions_1[n1,k,1] = coords[i,k]
+        
+      for j in range(i+1, i+s1):
+        if j >= nCoords:
+          break
+      
+        if coords[j,0] < regions_1[n1,0,0]:
+          regions_1[n1,0,0] = coords[j,0]
+ 
+        if coords[j,0] > regions_1[n1,0,1]:
+          regions_1[n1,0,1] = coords[j,0]
+
+        if coords[j,1] < regions_1[n1,1,0]:
+          regions_1[n1,1,0] = coords[j,1]
+ 
+        if coords[j,1] > regions_1[n1,1,1]:
+          regions_1[n1,1,1] = coords[j,1]
+          
+        if coords[j,2] < regions_1[n1,2,0]:
+          regions_1[n1,2,0] = coords[j,2]
+ 
+        if coords[j,2] > regions_1[n1,2,1]:
+          regions_1[n1,2,1] = coords[j,2]
+      
+      for k in range(3):
+        regions_1[n1,k,0] -= rep_dist2
+        regions_1[n1,k,1] += rep_dist2
+     
+      n1 += 1 # Number of primary regions     
+      
+    idx_1 = regions_1[:,0,0].argsort(kind='heapsort').astype(numpy.int32) # Sort X starts
+    
+    for a0 in range(n1):
+      a = idx_1[a0]
+      a1 = a * s1
+      a2 = min(nCoords, a1 + s1)
+            
+      # Compare between regions 
+      for b0 in range(a0, n1):
+        b = idx_1[b0]
+        b1 = b * s1
+        b2 = min(nCoords, b1 + s1)
+                 
+        if regions_1[b,0,0] < regions_1[a,0,1]:
+
+          if regions_1[b,1,1] < regions_1[a,1,0]:
+            continue
+          
+          if regions_1[b,1,0] > regions_1[a,1,1]:
+            continue
+          
+          if regions_1[b,2,1] < regions_1[a,2,0]:
+            continue
+          
+          if regions_1[b,2,0] > regions_1[a,2,1]:
+            continue
+ 
+          if a1 < b1:
+            i1 = a1
+            i2 = a2
+            j1 = b1
+            j2 = b2
+ 
+          else:
+            i1 = b1
+            i2 = b2
+            j1 = a1
+            j2 = a2
+          
+          for i in range(i1, i2):
+            for j in range(j1, j2):
+              if j < i+2: # not sequential
+                continue
+ 
+              #d_lim = rep_dist + radii[i] + radii[j]
+              d_lim = rep_dists[i] + radii[i] + rep_dists[j] + radii[j]
+ 
+              dx = coords[i,0] - coords[j,0]
+              if abs(dx) > d_lim:
+                continue
+
+              dy = coords[i,1] - coords[j,1]
+              if abs(dy) > d_lim:
+                continue
+
+              dz = coords[i,2] - coords[j,2]
+              if abs(dz) > d_lim:
+                continue
+
+              d2 = dx*dx + dy*dy + dz*dz
+ 
+              d_lim2 = d_lim * d_lim
+              if d2 > d_lim2:
+                continue
+              
+              if n < nRepMax:
+                rep_list[n,0] = i
+                rep_list[n,1] = j
+                n += 1
+                
+              n_rep_found += 1
+          
+        else: # All subsequent regions do not overlap
+          break  
+  
+  else: # Double split
+    # Calc bounding X regions
+
+    n1 = 0
+    for i in range(0, nCoords, s2): # Large region starts
+    
+      rep_dist2 = 2*rep_dists[i] + max_radius
+      
+      for a in range(3):
+        regions_1[n1,a,0] = coords[i,a]
+        regions_1[n1,a,1] = coords[i,a]
+      
+      j = i
+      for n2 in range(s3): # Small regions
+        for a in range(3):
+          regions_2[n1,n2,a,0] = coords[j,a]
+          regions_2[n1,n2,a,1] = coords[j,a]
+        
+        # Bounding box for small region
+        
+        for k in range(j+1, j+s1): # All remaining points
+          if k >= nCoords:
+            break
+          
+          for a in range(3):
+            if coords[k,a] < regions_2[n1,n2,a,0]:
+              regions_2[n1,n2,a,0] = coords[k,a]
+ 
+            if coords[k,a] > regions_2[n1,n2,a,1]:
+              regions_2[n1,n2,a,1] = coords[k,a] 
+        
+        # Bounding box of large region using small regions
+        
+        for a in range(3):
+          if regions_2[n1,n2,a,0] < regions_1[n1,a,0]:
+            regions_1[n1,a,0] = regions_2[n1,n2,a,0]
+
+          if regions_2[n1,n2,a,1] > regions_1[n1,a,1]:
+            regions_1[n1,a,1] = regions_2[n1,n2,a,1]
+
+        for a in range(3):
+          regions_2[n1,n2,a,0] -= rep_dist2
+          regions_2[n1,n2,a,1] += rep_dist2
+         
+        j += s1
+        
+        if j >= nCoords:
+          break
+      
+      for a in range(3):
+        regions_1[n1,a,0] -= rep_dist2
+        regions_1[n1,a,1] += rep_dist2
+        
+      n1 += 1
+     
+    idx_1 = regions_1[:,0,0].argsort(kind='heapsort').astype(numpy.int32) # Order X starts
+    idx_2 = regions_2[:,:,0,0].argsort(kind='heapsort', axis=1).astype(numpy.int32)    
+        
+    for p0 in range(n1):
+      p = idx_1[p0]
+      
+      for q0 in range(p0, n1):
+        q = idx_1[q0]
+                  
+        if regions_1[q,0,0] >= regions_1[p,0,1]: # Remainder do not overlap as they are in X order
+          break
+          
+        if regions_1[q,1,1] < regions_1[p,1,0]:
+          continue
+ 
+        if regions_1[q,1,0] > regions_1[p,1,1]:
+          continue
+ 
+        if regions_1[q,2,1] < regions_1[p,2,0]:
+          continue
+ 
+        if regions_1[q,2,0] > regions_1[p,2,1]:
+          continue
+ 
+        # Big bounding boxes overlap
+ 
+        for a0 in range(s3):
+          
+          a = idx_2[p,a0]
+          a1 = p * s2 + a * s1       # Region start
+          a2 = min(nCoords, a1 + s1)  # Region limit
+ 
+          if p == q:
+            n2 = a0 # Only compare other ones in same big box
+          else:
+            n2 = 0  # Compare all in other big box
+ 
+          # Compare between regions
+          for b0 in range(n2, s3):
+            b = idx_2[q,b0]
+                 
+            if regions_2[q,b,0,0] >= regions_2[p,a,0,1]:
+              break
+
+            if regions_2[q,b,0,1] < regions_2[p,a,0,0]: # Can happen across different big boxes
+              continue
+ 
+            if regions_2[q,b,1,1] < regions_2[p,a,1,0]:
+              continue
+ 
+            if regions_2[q,b,1,0] > regions_2[p,a,1,1]:
+              continue
+ 
+            if regions_2[q,b,2,1] < regions_2[p,a,2,0]:
+              continue
+ 
+            if regions_2[q,b,2,0] > regions_2[p,a,2,1]:
+              continue
+
+            b1 = q * s2 + b * s1
+            b2 = min(nCoords, b1 + s1)
+
+            if a1 < b1:
+              i1 = a1
+              i2 = a2
+              j1 = b1
+              j2 = b2
+ 
+            else:
+              i1 = b1
+              i2 = b2
+              j1 = a1
+              j2 = a2
+ 
+            # Small bounding boxes overlap
+ 
+            for i in range(i1, i2):
+              for j in range(j1, j2):
+                if j < i+2: # avoid sequential
+                  continue
+ 
+                #d_lim = rep_dist + radii[i] + radii[j]
+                d_lim = rep_dists[i] + radii[i] + rep_dists[j] + radii[j]
+ 
+                dx = coords[i,0] - coords[j,0]
+                if abs(dx) > d_lim:
+                  continue
+
+                dy = coords[i,1] - coords[j,1]
+                if abs(dy) > d_lim:
+                  continue
+
+                dz = coords[i,2] - coords[j,2]
+                if abs(dz) > d_lim:
+                  continue
+
+                d2 = dx*dx + dy*dy + dz*dz
+ 
+                d_lim2 = d_lim * d_lim
+                if d2 > d_lim2:
+                  continue
+                
+                if n < nRepMax:
+                  rep_list[n,0] = i
+                  rep_list[n,1] = j
+                  n += 1
+                
+                n_rep_found += 1
+
+  return n, n_rep_found
 
 
-cpdef double getTemp(ndarray[double, ndim=1] masses,
+cdef double getTemp(ndarray[double, ndim=1] masses,
                      ndarray[double, ndim=2] veloc,
                      int nCoords):
   cdef int i
@@ -230,7 +570,7 @@ cdef double getRepulsiveForce(ndarray[int,   ndim=2] repList,
   return force
 
 
-cpdef double getRestraintForce(ndarray[double, ndim=2] forces,
+cdef double getRestraintForce(ndarray[double, ndim=2] forces,
                               ndarray[double, ndim=2] coords,
                               ndarray[int,   ndim=2] restIndices,
                               ndarray[double, ndim=2] restLimits,
@@ -333,8 +673,9 @@ def runDynamics(ndarray[double, ndim=2] coords,
                 ndarray[int, ndim=1] restAmbig,
                 double tRef=1000.0, double tStep=0.001, int nSteps=1000,
                 double fConstR=1.0, double fConstD=25.0, double beta=10.0,
+                #double repDist=2.0, # A heuristic to limit the repulsion list
                 double tTaken=0.0, int printInterval=10000,
-                double tot0=20.458):
+                double tot0=20.458, int nRepMax=0):
 
   cdef int nRest = len(restIndices)
   cdef int nCoords = len(coords)
@@ -358,9 +699,11 @@ def runDynamics(ndarray[double, ndim=2] coords,
 
   cdef int i, j, n, step, nViol, nRep = 0
 
+  if not nRepMax:
+    nRepMax = nCoords*10 # Dictates initial size of repulsion list, though this is checked at startup
+
   cdef double d2, dx, dy, dz, ek, rmsd, tStep0, temp, fDist, fRep
   cdef ndarray[double, ndim=1] deltaLim = repDists * repDists
-  cdef double Langevin_gamma
 
   tStep0 = tStep * tot0
   beta /= tot0
@@ -371,23 +714,41 @@ def runDynamics(ndarray[double, ndim=2] coords,
     if m == INFINITY:
       veloc[i] = 0
 
-  cdef ndarray[int, ndim=2] repList = numpy.empty((0, 2), numpy.int32)
+  cdef ndarray[int, ndim=2] repList = numpy.empty((nRepMax, 2), numpy.int32)
   cdef ndarray[double, ndim=2] coordsPrev = numpy.array(coords)
   cdef ndarray[double, ndim=2] accel = numpy.zeros((nCoords, 3))
   cdef ndarray[double, ndim=2] forces = numpy.zeros((nCoords, 3))
 
   cdef double t0 = time.time()
 
-  nRep = getRepulsionList(repList, coords, repDists, radii, masses)
+  ##nRep = getRepulsionList(repList, coords, repDists, radii, masses)
   # Allocate with some padding
-  repList = numpy.resize(repList, (int(nRep * 1.2), 2))
-  nRep = getRepulsionList(repList, coords, repDists, radii, masses)
+  ##repList = numpy.resize(repList, (int(nRep * 1.2), 2))
+  ##nRep = getRepulsionList(repList, coords, repDists, radii, masses)
 
-  fRep = getRepulsiveForce(repList, forces, coords, nRep,  fConstR, radii)
-  fDist = getRestraintForce(forces, coords, restIndices, restLimits,
-                            restWeight, restAmbig, fConstD)
+  ##fRep = getRepulsiveForce(repList, forces, coords, nRep,  fConstR, radii)
+  ##fDist = getRestraintForce(forces, coords, restIndices, restLimits,
+  ##                          restWeight, restAmbig, fConstD)
+
+  cdef int s1 = 8        # Small bounding box size
+  cdef int s2 = 32 * s1  # Large bounding box size
+  cdef int s0
+  cdef int n_rep_found
+  
+  if nCoords >= s2 * s1: # Double split
+    s0 = s2
+  else:
+    s0 = s1
+
+  cdef ndarray[double, ndim=3] regions_1 = numpy.zeros((1+nCoords/s0, 3, 2))   # Large bounding boxes
+  cdef ndarray[double, ndim=4] regions_2 = numpy.zeros((1+nCoords/s0, s2/s1, 3, 2))   # Small bounding boxes
+
+  cdef ndarray[int, ndim=1] idx_1 = numpy.zeros(len(regions_1), numpy.int32)
+  cdef ndarray[int, ndim=2] idx_2 = numpy.zeros((len(regions_1), s1), numpy.int32)
+  cdef double max_radius = radii.max()
 
   for step in range(nSteps):
+    """
     for i in range(nCoords):
       dx = coords[i,0] - coordsPrev[i,0]
       dy = coords[i,1] - coordsPrev[i,1]
@@ -405,7 +766,58 @@ def runDynamics(ndarray[double, ndim=2] coords,
           coordsPrev[i,1] = coords[i,1]
           coordsPrev[i,2] = coords[i,2]
         break # Already re-calculated, no need to check more
+"""
 
+    if step == 0:
+
+      nRep, n_rep_found = getRepulsionList(repList, coords, regions_1, regions_2, idx_1, idx_2, s1, s2, nCoords, nRepMax, repDists, radii, max_radius)
+
+      if n_rep_found > nRepMax:
+        nRepMax = numpy.int32(n_rep_found * 1.1)
+        repList = numpy.zeros((nRepMax, 2), numpy.int32) 
+
+      for i in range(nCoords):
+        coordsPrev[i,0] = coords[i,0]
+        coordsPrev[i,1] = coords[i,1]
+        coordsPrev[i,2] = coords[i,2]
+        forces[i,0] = 0.0
+        forces[i,1] = 0.0
+        forces[i,2] = 0.0
+
+      fRep = getRepulsiveForce(repList, forces, coords, nRep,  fConstR, radii)
+      fDist = getRestraintForce(forces, coords, restIndices, restLimits, restWeight, restAmbig, fConstD)
+
+      for i in range(nCoords):
+        accel[i,0] = forces[i,0] / masses[i]
+        accel[i,1] = forces[i,1] / masses[i]
+        accel[i,2] = forces[i,2] / masses[i]
+
+    else:
+      maxDelta = 0.0
+      for i in range(nCoords): 
+        dx = coords[i,0] - coordsPrev[i,0]
+        dy = coords[i,1] - coordsPrev[i,1]
+        dz = coords[i,2] - coordsPrev[i,2]
+        d2 = dx*dx + dy*dy + dz*dz
+
+        if d2 > maxDelta:
+          maxDelta = d2
+  
+          if maxDelta > deltaLim[i]:
+            break            
+
+      if maxDelta > deltaLim.min():
+        nRep, n_rep_found = getRepulsionList(repList, coords, regions_1, regions_2, idx_1, idx_2, s1, s2, nCoords, nRepMax, repDists, radii, max_radius) # Handle errors
+
+        if n_rep_found > nRepMax:
+          nRepMax = numpy.int32(n_rep_found * 1.1)
+          repList = numpy.zeros((nRepMax, 2), numpy.int32)
+
+        for i in range(nCoords):
+          coordsPrev[i,0] = coords[i,0]
+          coordsPrev[i,1] = coords[i,1]
+          coordsPrev[i,2] = coords[i,2]
+      
     updateMotion(masses, forces, accel, veloc, coords, nCoords, tRef, tStep0, beta)
 
     for i in range(nCoords):
@@ -428,4 +840,4 @@ def runDynamics(ndarray[double, ndim=2] coords,
 
     tTaken += tStep
 
-  return tTaken
+  return tTaken, n_rep_found

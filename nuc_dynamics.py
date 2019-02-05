@@ -819,7 +819,7 @@ def unpack_chromo_coords(coords, chromosomes, seq_pos_dict):
 
 
 def anneal_model(model_data, anneal_schedule, masses, radii, restraints, repDists,
-                 ambiguity, temp, time_step, dyn_steps, repulse, dist):
+                 ambiguity, temp, time_step, dyn_steps, repulse, dist, n_rep_max):
                              
   import gc
   
@@ -843,15 +843,16 @@ def anneal_model(model_data, anneal_schedule, masses, radii, restraints, repDist
     # Update coordinates for this temp
     
     try:  
-      dt = dyn_util.runDynamics(model_coords, masses, radii, repDists,
+      #dt = dyn_util.runDynamics(model_coords, masses, radii, repDists,
+      dt, n_rep_max = dyn_util.runDynamics(model_coords, masses, radii, repDists,
               restraints['indices'], restraints['dists'], restraints['weight'], ambiguity,
               temp, time_step, dyn_steps, repulse, dist,
-              printInterval=printInterval)
+              printInterval=printInterval, nRepMax=n_rep_max)
     
     except Exception as err:
       return err
  
-    #n_rep_max = np.int32(1.05 * n_rep_max) # Base on num in prev cycle, plus a small overhead
+    n_rep_max = np.int32(1.05 * n_rep_max) # Base on num in prev cycle, plus a small overhead
     time_taken += dt
   
   # Center
@@ -1108,7 +1109,7 @@ def anneal_genome(contact_dict, num_models, particle_size,
         
     # Below will be set to restrict memory allocation in the repusion list
     # (otherwise all vs all can be huge)
-    #n_rep_max = np.int32(0)
+    n_rep_max = np.int32(0)
     
     # Annealing parameters
     temp_start = anneal_params['temp_start']
@@ -1143,7 +1144,7 @@ def anneal_genome(contact_dict, num_models, particle_size,
        
     # Update coordinates in the annealing schedule which is applied to each model in parallel
     common_args = [anneal_schedule, masses, radii, restraints, repDists,
-                   ambiguity, temp, time_step, dyn_steps, repulse, dist]
+                   ambiguity, temp, time_step, dyn_steps, repulse, dist, n_rep_max]
     
     task_data = [(m, coords[m]) for m in range(len(coords))]
     
@@ -1532,15 +1533,15 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
   
   if have_diploid:
     contact_dict = resolve_homolog_ambiguous(contact_dict)
-    info('Total number of contacts after removing homologous ambiguity = %d' % contact_count(contact_dict))
+    info('Total number of contacts after resolving homologous ambiguity = %d' % contact_count(contact_dict))
     if save_intermediate_ncc:
-      save_ncc_file(ncc_file_path, 'resolve_homo', contact_dict, particle_size)
+      save_ncc_file(ncc_file_path, 'resolve_homo', contact_dict, particle_sizes[0])
       
     if ncc2_file_path:
       contact2_dict = resolve_homolog_ambiguous(contact2_dict)
-      info('Total number of secondary contacts after removing homologous ambiguity = %d' % contact_count(contact2_dict))
+      info('Total number of secondary contacts after resolving homologous ambiguity = %d' % contact_count(contact2_dict))
       if save_intermediate_ncc:
-        save_ncc_file(ncc2_file_path, 'resolve_homo', contact2_dict, particle_size, ambig_offset)
+        save_ncc_file(ncc2_file_path, 'resolve_homo', contact2_dict, particle_sizes[0], ambig_offset)
   
 
   # Initial coords will be random
