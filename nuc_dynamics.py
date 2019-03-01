@@ -75,6 +75,19 @@ def parallel_split_job(target_func, split_data, common_args, num_cpu=MAX_CORES, 
   num_tasks   = len(split_data)
   num_process = min(num_cpu, num_tasks)
   
+  if num_process == 1:
+    
+    results = []
+    for data_item in split_data:
+      result = target_func(data_item, *common_args)
+      
+      if isinstance(result, Exception):
+        raise(result)
+        
+      results.append(result)
+    
+    return results
+  
   processes   = []
   
   if collect_output:
@@ -102,6 +115,7 @@ def parallel_split_job(target_func, split_data, common_args, num_cpu=MAX_CORES, 
       t, result = queue.get() # Asynchronous fetch output: whichever process completes a task first
       
       if isinstance(result, Exception):
+        warn(result)
         critical('\n* * * * C/Cython code may need to be recompiled. Try running "python setup_cython.py build_ext --inplace" * * * *\n')
         
       results[t] = result
@@ -619,29 +633,30 @@ def resolve_3d_ambiguous(contact_dict, seq_pos_dict, coords_dict, percentile_thr
     if min_dist > 0.0:
       closest_nz.append(min_dist)
   
-  dist_thresh = np.percentile(closest_nz, [percentile_threshold])[0]
-  
-  info('Filter ambiguity groups. Threshold = %.2f' % dist_thresh)
-  
   remove = set()
   
-  for ambig_group in ambig_groups:
-    min_dist = min_dists[ambig_group]
-    min_sep = min_seps[ambig_group]
+  if closest_nz:
+    dist_thresh = np.percentile(closest_nz, [percentile_threshold])[0]
+  
+    info('Filter ambiguity groups. Threshold = %.2f' % dist_thresh)
+  
+    for ambig_group in ambig_groups:
+      min_dist = min_dists[ambig_group]
+      min_sep = min_seps[ambig_group]
 
-    for chr_a, pos_a, chr_b, pos_b, dist, bead_sep in ambig_groups[ambig_group]:
-      if (min_dist == 0) and (chr_a != chr_b):
-        remove.add((ambig_group, chr_a, pos_a, chr_b, pos_b))
-        continue
-      
-      if (min_sep < min_bead_sep) and (chr_a != chr_b):
-        remove.add((ambig_group, chr_a, pos_a, chr_b, pos_b))
-        continue
-        
-      if dist != min_dist:
-        if dist > min_dist + dist_thresh/2:
+      for chr_a, pos_a, chr_b, pos_b, dist, bead_sep in ambig_groups[ambig_group]:
+        if (min_dist == 0) and (chr_a != chr_b):
           remove.add((ambig_group, chr_a, pos_a, chr_b, pos_b))
           continue
+        
+        if (min_sep < min_bead_sep) and (chr_a != chr_b):
+          remove.add((ambig_group, chr_a, pos_a, chr_b, pos_b))
+          continue
+        
+        if dist != min_dist:
+          if dist > min_dist + dist_thresh/2:
+            remove.add((ambig_group, chr_a, pos_a, chr_b, pos_b))
+            continue
           
         if dist > dist_thresh:
           remove.add((ambig_group, chr_a, pos_a, chr_b, pos_b))
@@ -725,7 +740,7 @@ def remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos, thresh
 
       coords_a = coords_dict[chr_a]
       coords_b = coords_dict[chr_b]
-
+      
       struc_dists = []
 
       for m in range(len(coords_a)):
@@ -764,11 +779,10 @@ def get_random_coords(shape, radius=10.0):
 def get_interpolated_coords(coords, pos, prev_pos):
   from numpy import interp, apply_along_axis
   from functools import partial
-
-  *size, length, ndim = coords.shape
-  coords = coords.reshape((-1, length, ndim))
-  coords = apply_along_axis(partial(interp, pos, prev_pos), 1, coords)
-  return coords.reshape(size + [len(pos), ndim])
+  
+  coords = apply_along_axis(partial(interp, pos, prev_pos), -2, coords)
+   
+  return coords
   
   
 def pack_chromo_coords(coords_dict, chromosomes):
@@ -818,8 +832,8 @@ def unpack_chromo_coords(coords, chromosomes, seq_pos_dict):
   return coords_dict
 
 
-def anneal_model(model_data, anneal_schedule, masses, radii, restraints, repDists,
-                 ambiguity, temp, time_step, dyn_steps, repulse, dist, n_rep_max):
+def anneal_model(model_data, anneal_schedule, masses, radii, restraints, rep_dists,
+                 ambiguity, temp, time_step, dyn_steps, repulse, dist, bead_size):
                              
   import gc
   
@@ -830,29 +844,32 @@ def anneal_model(model_data, anneal_schedule, masses, radii, restraints, repDist
   time_taken = 0.0
   
   if m == 0:
-    printInterval = max(1, dyn_steps/2)
+    print_interval = max(1, dyn_steps/2)
   
   else:
-    printInterval = 0
+    print_interval = 0
   
   info('  starting model %d' % m)
+  
+  nrep_max = np.int32(0)
   
   for temp, repulse in anneal_schedule:
     gc.collect() # Try to free some memory
     
     # Update coordinates for this temp
     
-    try:  
-      #dt = dyn_util.runDynamics(model_coords, masses, radii, repDists,
-      dt, n_rep_max = dyn_util.runDynamics(model_coords, masses, radii, repDists,
-              restraints['indices'], restraints['dists'], restraints['weight'], ambiguity,
-              temp, time_step, dyn_steps, repulse, dist,
-              printInterval=printInterval, nRepMax=n_rep_max)
+    #try:
+    dt, nrep_max = dyn_util.run_dynamics(model_coords, masses, radii, rep_dists,
+                                         restraints['indices'], restraints['dists'],
+                                         restraints['weight'], ambiguity,
+                                         temp, time_step, dyn_steps, repulse, dist,
+                                         bead_size, nrep_max,
+                                         print_interval=print_interval)
     
-    except Exception as err:
-      return err
- 
-    n_rep_max = np.int32(1.05 * n_rep_max) # Base on num in prev cycle, plus a small overhead
+    #except Exception as err:
+    #  return err
+    
+    nrep_max = np.int32(nrep_max * 1.2)
     time_taken += dt
   
   # Center
@@ -869,11 +886,12 @@ def calc_bins(chromo_limits, particle_size):
 
   bins = {}
   for chromo, (start, end) in chromo_limits.items():
-    startBin = start // particle_size
-    endBin = 1 + (end-1) // particle_size
-    start = particle_size * startBin
-    end = particle_size * endBin
+    first_bin = start // particle_size
+    last_bin = 1 + (end-1) // particle_size
+    start = particle_size * first_bin
+    end = particle_size * last_bin
     bins[chromo] = arange(start, end, particle_size, dtype='int32')
+    
   return bins
 
 
@@ -888,6 +906,7 @@ def calc_ambiguity_offsets(groups):
   group_starts[-1] = group_starts[0] = 1
   group_starts[:-1] |= groups == 0
   group_starts[1:-1] |= groups[1:] != groups[:-1]
+  
   return flatnonzero(group_starts).astype('int32')
 
 
@@ -908,6 +927,7 @@ def backbone_restraints(seq_pos, particle_size, scale=1.0, lower=0.1, upper=1.1,
 
 
 def flatten_dict(d):
+
   r = {}
   for key, value in d.items():
     if isinstance(value, dict):
@@ -918,21 +938,25 @@ def flatten_dict(d):
 
 
 def tree():
-    from collections import defaultdict
-    def tree_():
-        return defaultdict(tree_)
-    return tree_()
+  from collections import defaultdict
+  
+  def tree_():
+    return defaultdict(tree_)
+    
+  return tree_()
 
 
 def unflatten_dict(d):
-    r = tree()
 
-    for ks, v in d.items():
-        d = r
-        for k in ks[:-1]:
-            d = d[k]
-        d[ks[-1]] = v
-    return r
+  r = tree()
+
+  for ks, v in d.items():
+    d = r
+    for k in ks[:-1]:
+        d = d[k]
+    d[ks[-1]] = v
+    
+  return r
 
 
 def concatenate_restraints(restraint_dict, pos_dict):
@@ -945,6 +969,7 @@ def concatenate_restraints(restraint_dict, pos_dict):
   chromosome_offsets = dict(zip(chromosomes, accumulate(chain(
     [0], map(len, map(partial(op.getitem, pos_dict), chromosomes)))
   )))
+  
   flat_restraints = sorted(flatten_dict(restraint_dict).items())
 
   r = concatenate(list(map(op.itemgetter(1), flat_restraints)))
@@ -966,7 +991,7 @@ def calc_restraints(contact_dict, pos_dict, particle_size,
   r = defaultdict(dict)
   for (chr_a, chr_b), contacts in flatten_dict(contact_dict).items():
     if len(contacts) < 1:
-        continue
+      continue
     r[chr_a][chr_b] = empty(len(contacts), dtype=Restraint)
 
     # below is not quite correct if pos_dict[chr_a] value is exactly the same as contacts['pos'][:, 0]
@@ -980,6 +1005,7 @@ def calc_restraints(contact_dict, pos_dict, particle_size,
     r[chr_a][chr_b]['ambiguity'] = contacts['ambiguity']
     r[chr_a][chr_b]['dists'] = dists
     r[chr_a][chr_b]['weight'] = weight
+    
   return dict(r)
 
 
@@ -989,22 +1015,24 @@ def bin_restraints(restraints):
   restraints['indices'] = sort(restraints['indices'], axis=1)
 
   # Ambiguity group 0 is unique restraints, so they can all be binned
-  _, inverse, counts = unique(
-    restraints['ambiguity'], return_inverse=True, return_counts=True
-  )
+  _, inverse, counts = unique(restraints['ambiguity'],
+                              return_inverse=True,
+                              return_counts=True)
+                              
   restraints['ambiguity'][counts[inverse] == 1] = 0
 
   # Bin within ambiguity groups
-  uniques, idxs = unique(
-    restraints[['ambiguity', 'indices', 'dists']], return_inverse=True
-  )
+  uniques, idxs = unique(restraints[['ambiguity', 'indices', 'dists']],
+                         return_inverse=True)
 
   binned = empty(len(uniques), dtype=Restraint)
   binned['ambiguity'] = uniques['ambiguity']
   binned['indices'] = uniques['indices']
   binned['dists'] = uniques['dists']
   binned['weight'] = bincount(idxs, weights=restraints['weight'])
+  
   return binned
+
 
 def merge_dicts(*dicts):
   from collections import defaultdict
@@ -1014,147 +1042,143 @@ def merge_dicts(*dicts):
   for d in dicts:
     for k, v in flatten_dict(d).items():
       new[k].append(v)
+      
   new = {k: concatenate(v) for k, v in new.items()}
+  
   return unflatten_dict(new)
+
 
 def determine_bead_size(particle_size):
   
   return particle_size ** (1/3)
 
+
 def anneal_genome(contact_dict, num_models, particle_size,
                   general_calc_params, anneal_params,
                   prev_seq_pos_dict=None, start_coords=None, num_cpu=MAX_CORES):
-    """
-    Use chromosome contact data to generate distance restraints and then
-    apply a simulated annealing protocul to generate/refine coordinates.
-    Starting coordinates may be random of from a previous (e.g. lower
-    resolution) stage.
-    """
-    
-    from numpy import (int32, ones, empty, random, concatenate, stack, argsort, arange,
-                       arctan, full, zeros)
-    from math import log, exp, atan, pi
-    from functools import partial
-    import gc
+  """
+  Use chromosome contact data to generate distance restraints and then
+  apply a simulated annealing protocul to generate/refine coordinates.
+  Starting coordinates may be random of from a previous (e.g. lower
+  resolution) stage.
+  """
+  
+  from numpy import (int32, ones, empty, random, concatenate, stack, argsort, arange,
+                     arctan, full, zeros)
+  from math import log, exp, atan, pi
+  from functools import partial
+  import gc
 
-    bead_size = determine_bead_size(particle_size)
+  bead_size = determine_bead_size(particle_size)
 
-    random.seed(general_calc_params['random_seed'])
-    
-    particle_size = int32(particle_size)
-    seq_pos_dict = calc_bins(calc_limits(contact_dict), particle_size)
-    
-    chromosomes = sorted(
-        set.union(set(contact_dict), *map(set, contact_dict.values()))
-    )
+  random.seed(general_calc_params['random_seed'])
+  
+  particle_size = int32(particle_size)
+  seq_pos_dict = calc_bins(calc_limits(contact_dict), particle_size)
+  
+  chromosomes = sorted(set.union(set(contact_dict), *map(set, contact_dict.values())))
 
-    chrs = list(chromosomes)
-    for chromo in chrs:
-      if chromo not in seq_pos_dict:
-        chromosomes.remove(chromo)
-        
-    points = chromosomes[:]
-
-    restraint_dict = calc_restraints(
-        contact_dict, seq_pos_dict, particle_size, scale=bead_size,
-        lower=general_calc_params['contact_dist_lower'],
-        upper=general_calc_params['contact_dist_upper'], weight=1.0
-    )
-
-    # Adjust to keep force/particle approximately constant
-    # why 215 (in opencl version this is 430 instead)
-    dist = 215.0 * (sum(map(len, seq_pos_dict.values())) /
-                    sum(map(lambda v: v['weight'].sum(),
-                            flatten_dict(restraint_dict).values())))
-
-    restraint_dict = merge_dicts(
-      restraint_dict,
-      # Backbone restraints
-      {chromo: {chromo: backbone_restraints(
-        seq_pos_dict[chromo], particle_size, bead_size,
-        lower=general_calc_params['backbone_dist_lower'],
-        upper=general_calc_params['backbone_dist_upper'], weight=1.0
-      )} for chromo in chromosomes}
-    )
-
-    coords = start_coords or {}
-    for chromo in chromosomes:
-      if chromo not in coords:
-        coords[chromo] = get_random_coords(
-          (num_models, len(seq_pos_dict[chromo]), 3), general_calc_params['random_radius'] * bead_size
-        )
-      elif coords[chromo].shape[1] != len(seq_pos_dict[chromo]):
-        coords[chromo] = get_interpolated_coords(
-          coords[chromo], seq_pos_dict[chromo], prev_seq_pos_dict[chromo]
-        )
-
-    # Equal unit masses and radii for all particles
-    masses = {chromo: ones(len(pos), float) for chromo, pos in seq_pos_dict.items()}
-
-    radii = {chromo: full(len(pos), bead_size, float)
-             for chromo, pos in seq_pos_dict.items()}
-    repDists = {chromo: r * 0.75 for chromo, r in radii.items()}
-
-    # Concatenate chromosomal data into a single array of particle restraints
-    # for structure calculation.
-    restraints = bin_restraints(concatenate_restraints(restraint_dict, seq_pos_dict))
-    coords = concatenate([coords[chromo] for chromo in points], axis=1)
-    masses = concatenate([masses[chromo] for chromo in points])
-    radii = concatenate([radii[chromo] for chromo in points])
-    repDists = concatenate([repDists[chromo] for chromo in points])
-
-    restraint_order = argsort(restraints['ambiguity'])
-    restraints = restraints[restraint_order]
-    ambiguity = calc_ambiguity_offsets(restraints['ambiguity'])
-        
-    # Below will be set to restrict memory allocation in the repusion list
-    # (otherwise all vs all can be huge)
-    n_rep_max = np.int32(0)
-    
-    # Annealing parameters
-    temp_start = anneal_params['temp_start']
-    temp_end = anneal_params['temp_end']
-    temp_steps = anneal_params['temp_steps']
-    
-    # Setup annealing schedule: setup temps and repulsive terms
-    adj = 1.0 / atan(10.0)
-    decay = log(temp_start/temp_end)    
-    anneal_schedule = []
-    
-    for step in range(temp_steps):
-      gc.collect() # Try to free some memory
+  chrs = list(chromosomes)
+  for chromo in chrs:
+    if chromo not in seq_pos_dict:
+      chromosomes.remove(chromo)
       
-      frac = step/float(temp_steps)
-    
-      # exponential temp decay
-      temp = temp_start * exp(-decay*frac)
-    
-      # sigmoidal repusion scheme
-      repulse = 0.5 + adj * atan(frac*20.0-10) / pi 
+  points = chromosomes[:]
+
+  restraint_dict = calc_restraints(contact_dict, seq_pos_dict, particle_size,
+                                   scale=bead_size,
+                                   lower=general_calc_params['contact_dist_lower'],
+                                   upper=general_calc_params['contact_dist_upper'],
+                                   weight=1.0)
+
+  # Adjust to keep force/particle approximately constant
+  # why 215 (in opencl version this is 430 instead)
+  dist = 215.0 * (sum(map(len, seq_pos_dict.values())) /
+                  sum(map(lambda v: v['weight'].sum(),
+                          flatten_dict(restraint_dict).values())))
+
+  restraint_dict = merge_dicts(
+    restraint_dict,
+    # Backbone restraints
+    {chromo: {chromo: backbone_restraints(
+      seq_pos_dict[chromo], particle_size, bead_size,
+      lower=general_calc_params['backbone_dist_lower'],
+      upper=general_calc_params['backbone_dist_upper'], weight=1.0
+    )} for chromo in chromosomes}
+  )
+
+  coords = start_coords or {}
+  for chromo in chromosomes:
+    if chromo not in coords:
+      coords[chromo] = get_random_coords((num_models, len(seq_pos_dict[chromo]), 3),
+                                         general_calc_params['random_radius'] * bead_size)
+                                         
+    elif coords[chromo].shape[1] != len(seq_pos_dict[chromo]):
+      coords[chromo] = get_interpolated_coords(coords[chromo], seq_pos_dict[chromo],
+                                               prev_seq_pos_dict[chromo])
+
+  # Equal unit masses and radii for all particles
+  masses = {chromo:ones(len(pos), float) for chromo, pos in seq_pos_dict.items()}
+  radii = {chromo:full(len(pos), bead_size, float) for chromo, pos in seq_pos_dict.items()}
+  rep_dists = {chromo: r * 1.0 for chromo, r in radii.items()}
+
+  # Concatenate chromosomal data into a single array of particle restraints
+  # for structure calculation.
+  restraints = bin_restraints(concatenate_restraints(restraint_dict, seq_pos_dict))
+  coords = concatenate([coords[chromo] for chromo in points], axis=1)
+  masses = concatenate([masses[chromo] for chromo in points])
+  radii = concatenate([radii[chromo] for chromo in points])
+  rep_dists = concatenate([rep_dists[chromo] for chromo in points])
+
+  restraint_order = argsort(restraints['ambiguity'])
+  restraints = restraints[restraint_order]
+  ambiguity = calc_ambiguity_offsets(restraints['ambiguity'])
       
-      temp *= bead_size ** 2
-      repulse /= bead_size ** 2
+  
+  # Annealing parameters
+  temp_start = anneal_params['temp_start']
+  temp_end = anneal_params['temp_end']
+  temp_steps = anneal_params['temp_steps']
+  
+  # Setup annealing schedule: setup temps and repulsive terms
+  adj = 1.0 / atan(10.0)
+  decay = log(temp_start/temp_end)    
+  anneal_schedule = []
+  
+  for step in range(temp_steps):
+    gc.collect() # Try to free some memory
+    
+    frac = step/float(temp_steps)
+  
+    # exponential temp decay
+    temp = temp_start * exp(-decay*frac)
+    
+    # sigmoidal repusion scheme
+    repulse = 0.5 + adj * atan(frac*20.0-10) / pi 
+    
+    temp *= bead_size ** 2
+    repulse /= bead_size ** 2
+    
+    anneal_schedule.append((temp, repulse))  
       
-      anneal_schedule.append((temp, repulse))  
-        
-    # Paricle dynamics parameters
-    # (these need not be fixed for all stages, but are for simplicity)    
-    dyn_steps = anneal_params['dynamics_steps']
-    time_step = anneal_params['time_step']
-       
-    # Update coordinates in the annealing schedule which is applied to each model in parallel
-    common_args = [anneal_schedule, masses, radii, restraints, repDists,
-                   ambiguity, temp, time_step, dyn_steps, repulse, dist, n_rep_max]
-    
-    task_data = [(m, coords[m]) for m in range(len(coords))]
-    
-    coords = parallel_split_job(anneal_model, task_data, common_args, num_cpu, collect_output=True)
-    coords = np.array(coords)
-   
-    # Convert from single coord array to dict keyed by chromosome
-    coords_dict = unpack_chromo_coords(coords, chromosomes, seq_pos_dict)
-    
-    return coords_dict, seq_pos_dict
+  # Paricle dynamics parameters
+  # (these need not be fixed for all stages, but are for simplicity)    
+  dyn_steps = anneal_params['dynamics_steps']
+  time_step = anneal_params['time_step']
+     
+  # Update coordinates in the annealing schedule which is applied to each model in parallel
+  common_args = [anneal_schedule, masses, radii, restraints, rep_dists,
+                 ambiguity, temp, time_step, dyn_steps, repulse, dist, bead_size]
+  
+  task_data = [(m, coords[m]) for m in range(len(coords))]
+
+  coords = parallel_split_job(anneal_model, task_data, common_args, num_cpu, collect_output=True)
+  coords = np.array(coords)
+  
+  # Convert from single coord array to dict keyed by chromosome
+  coords_dict = unpack_chromo_coords(coords, chromosomes, seq_pos_dict)
+  
+  return coords_dict, seq_pos_dict
 
 
 def open_file(file_path, mode=None, gzip_exts=('.gz','.gzip')):
@@ -1169,6 +1193,7 @@ def open_file(file_path, mode=None, gzip_exts=('.gz','.gzip')):
     file_obj = open(file_path, mode or 'rU', IO_BUFFER)
  
   return file_obj
+
 
 def load_n3d_coords(file_path):
  """
@@ -1722,7 +1747,6 @@ def demo_calc_genome_structure():
                         particle_sizes, num_models, isolation_threshold_cis,
                         isolation_threadhold_trans, out_format='pdb')
 
-    
 test_imports()
 
 import dyn_util
