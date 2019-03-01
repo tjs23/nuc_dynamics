@@ -1,7 +1,7 @@
 from libc.math cimport exp, abs, sqrt, ceil, pow
 from numpy cimport ndarray, double_t, int_t, dtype
 from numpy.math cimport INFINITY
-import numpy, time
+import numpy, time, sys
 
 BOLTZMANN_K = 0.0019872041
 
@@ -15,67 +15,16 @@ class NucCythonError(Exception):
     Exception.__init__(self, err)
 
 
-"""
-cdef int getRepulsionList(ndarray[int,   ndim=2] repList,
-                          ndarray[double, ndim=2] coords,
-                          ndarray[double, ndim=1] repDists,
-                          ndarray[double, ndim=1] radii,
-                          ndarray[double, ndim=1] masses):
-
-  cdef int i, j
-  cdef int n = 0
-  cdef double dx, dy, dz, d2
-  cdef double distLim
-  cdef double distLim2
-
-  for i in range(len(coords)-2):
-    if masses[i] == INFINITY:
-      continue
-
-    for j in range(i+2, len(coords)):
-      if masses[j] == INFINITY:
-        continue
-
-      distLim = repDists[i] + radii[i] + repDists[j] + radii[j]
-      distLim2 = distLim * distLim
-
-      dx = coords[i,0] - coords[j,0]
-      if abs(dx) > distLim:
-        continue
-
-      dy = coords[i,1] - coords[j,1]
-      if abs(dy) > distLim:
-        continue
-
-      dz = coords[i,2] - coords[j,2]
-      if abs(dz) > distLim:
-        continue
-
-      d2 = dx*dx + dy*dy + dz*dz
-
-      if d2 > distLim2:
-        continue
-
-      # If max is exceeded, array will be resized and recalculated
-      if n < len(repList):
-        repList[n,0] = i
-        repList[n,1] = j
-
-      n += 1
-
-  return n
-"""
-
 cdef getRepulsionList(ndarray[int,   ndim=2] rep_list,
-                          ndarray[double, ndim=2] coords,
-                          ndarray[double, ndim=3] regions_1,
-                          ndarray[double, ndim=4] regions_2,
-                          ndarray[int, ndim=1] idx_1,
-                          ndarray[int, ndim=2] idx_2,
-                          int s1, int s2, int nCoords, int nRepMax,
-                          #double rep_dist, ndarray[double, ndim=1] radii,
-                          ndarray[double, ndim=1] rep_dists, ndarray[double, ndim=1] radii,
-                          double max_radius):
+                      ndarray[double, ndim=2] coords,
+                      ndarray[double, ndim=3] regions_1,
+                      ndarray[double, ndim=4] regions_2,
+                      ndarray[int, ndim=1] idx_1,
+                      ndarray[int, ndim=2] idx_2,
+                      int s1, int s2, int nCoords, int n_rep_max,
+                      #double rep_dist, ndarray[double, ndim=1] radii,
+                      ndarray[double, ndim=1] rep_dists, ndarray[double, ndim=1] radii,
+                      double max_radius):
   
   cdef int i, j, k, i1, i2, j1, j2, n2
   cdef int a, b, a0, b0, a1, b1, a2, b2, p0, p, q0, q
@@ -115,13 +64,12 @@ cdef getRepulsionList(ndarray[int,   ndim=2] rep_list,
         if d2 > d_lim2:
           continue
         
-        if n < nRepMax:
+        if n < n_rep_max:
           rep_list[n,0] = i
           rep_list[n,1] = j
           n += 1
         
         n_rep_found += 1
-        
         
   elif nCoords < s1 * s2: # Single split
     # Calc bounding X regions
@@ -228,7 +176,7 @@ cdef getRepulsionList(ndarray[int,   ndim=2] rep_list,
               if d2 > d_lim2:
                 continue
               
-              if n < nRepMax:
+              if n < n_rep_max:
                 rep_list[n,0] = i
                 rep_list[n,1] = j
                 n += 1
@@ -237,10 +185,10 @@ cdef getRepulsionList(ndarray[int,   ndim=2] rep_list,
           
         else: # All subsequent regions do not overlap
           break  
-  
+
   else: # Double split
     # Calc bounding X regions
-
+    
     n1 = 0
     for i in range(0, nCoords, s2): # Large region starts
     
@@ -395,32 +343,33 @@ cdef getRepulsionList(ndarray[int,   ndim=2] rep_list,
                 if d2 > d_lim2:
                   continue
                 
-                if n < nRepMax:
+                if n < n_rep_max:
                   rep_list[n,0] = i
                   rep_list[n,1] = j
                   n += 1
                 
                 n_rep_found += 1
-
+                
   return n, n_rep_found
 
 
 cdef double getTemp(ndarray[double, ndim=1] masses,
-                     ndarray[double, ndim=2] veloc,
-                     int nCoords):
+                    ndarray[double, ndim=2] veloc,
+                    int nCoords):
   cdef int i
   cdef double kin = 0.0
 
   for i in range(nCoords):
     if masses[i] == INFINITY:
       continue
+
     kin += masses[i] * (veloc[i,0]*veloc[i,0] + veloc[i,1]*veloc[i,1] + veloc[i,2]*veloc[i,2])
 
   return kin / (3 * nCoords * BOLTZMANN_K)
 
 
-def getStats(ndarray[int,   ndim=2] restIndices,
-             ndarray[double, ndim=2] restLimits,
+def getStats(ndarray[int,   ndim=2] rest_indices,
+             ndarray[double, ndim=2] rest_limits,
              ndarray[double, ndim=2] coords,
              int nRest):
 
@@ -429,14 +378,14 @@ def getStats(ndarray[int,   ndim=2] restIndices,
   cdef double viol, dmin, dmax, dx, dy, dz, r, s = 0
 
   for i in range(nRest):
-    j = restIndices[i,0]
-    k = restIndices[i,1]
+    j = rest_indices[i,0]
+    k = rest_indices[i,1]
 
     if j == k:
       continue
 
-    dmin = restLimits[i,0]
-    dmax = restLimits[i,1]
+    dmin = rest_limits[i,0]
+    dmax = rest_limits[i,1]
 
     dx = coords[j,0] - coords[k,0]
     dy = coords[j,1] - coords[k,1]
@@ -511,7 +460,7 @@ cdef void updateVelocity(ndarray[double, ndim=1] masses,
     veloc[i,2] += 0.5 * tStep * (forces[i,2] / masses[i] + r * veloc[i,2] - accel[i,2])
 
 
-cdef double getRepulsiveForce(ndarray[int,   ndim=2] repList,
+cdef double getRepulsiveForce(ndarray[int,   ndim=2] rep_list,
                               ndarray[double, ndim=2] forces,
                               ndarray[double, ndim=2] coords,
                               int nRep, double fConst,
@@ -526,8 +475,8 @@ cdef double getRepulsiveForce(ndarray[int,   ndim=2] repList,
     return force
 
   for i from 0 <= i < nRep:
-    j = repList[i,0]
-    k = repList[i,1]
+    j = rep_list[i,0]
+    k = rep_list[i,1]
     repDist = radii[j] + radii[k]
     repDist2 = repDist * repDist
 
@@ -572,10 +521,10 @@ cdef double getRepulsiveForce(ndarray[int,   ndim=2] repList,
 
 cdef double getRestraintForce(ndarray[double, ndim=2] forces,
                               ndarray[double, ndim=2] coords,
-                              ndarray[int,   ndim=2] restIndices,
-                              ndarray[double, ndim=2] restLimits,
-                              ndarray[double, ndim=1] restWeight,
-                              ndarray[int, ndim=1] restAmbig,
+                              ndarray[int,   ndim=2] rest_indices,
+                              ndarray[double, ndim=2] rest_limits,
+                              ndarray[double, ndim=1] rest_weight,
+                              ndarray[int, ndim=1] rest_ambig,
                               double fConst, double exponent=2.0,
                               double switchRatio=0.5, double asymptote=1.0):
 
@@ -583,14 +532,14 @@ cdef double getRestraintForce(ndarray[double, ndim=2] forces,
   cdef double a, b, d, dmin, dmax, dx, dy, dz, distSwitch
   cdef double r, r2, s2, rjk, ujk, force = 0, t
 
-  for m in range(len(restAmbig) - 1):
-    nAmbig = restAmbig[m+1] - restAmbig[m]
-    i = restAmbig[m]
+  for m in range(len(rest_ambig) - 1):
+    nAmbig = rest_ambig[m+1] - rest_ambig[m]
+    i = rest_ambig[m]
     r2 = 0.0
 
     for n in range(nAmbig):
-      j = restIndices[i+n,0]
-      k = restIndices[i+n,1]
+      j = rest_indices[i+n,0]
+      k = rest_indices[i+n,1]
 
       if j == k:
         continue
@@ -598,7 +547,7 @@ cdef double getRestraintForce(ndarray[double, ndim=2] forces,
       dx = coords[j,0] - coords[k,0]
       dy = coords[j,1] - coords[k,1]
       dz = coords[j,2] - coords[k,2]
-      r = dx*dx + dy*dy + dz*dz
+      r = max(dx*dx + dy*dy + dz*dz, 1e-08)
       r2 += 1.0 / (r * r)
 
     if r2 <= 0:
@@ -606,8 +555,8 @@ cdef double getRestraintForce(ndarray[double, ndim=2] forces,
 
     r2 = 1.0 / sqrt(r2)
 
-    dmin = restLimits[i,0]
-    dmax = restLimits[i,1]
+    dmin = rest_limits[i,0]
+    dmax = rest_limits[i,1]
     distSwitch = dmax * switchRatio
 
     if r2 < dmin*dmin:
@@ -636,8 +585,8 @@ cdef double getRestraintForce(ndarray[double, ndim=2] forces,
     force += ujk
 
     for n in range(nAmbig):
-      j = restIndices[i+n,0]
-      k = restIndices[i+n,1]
+      j = rest_indices[i+n,0]
+      k = rest_indices[i+n,1]
 
       if j == k:
         continue
@@ -647,7 +596,7 @@ cdef double getRestraintForce(ndarray[double, ndim=2] forces,
       dz = coords[j,2] - coords[k,2]
 
       s2 = max(dx*dx + dy*dy + dz*dz, 1e-08)
-      t = rjk * pow(r2, 2.5) / (s2 * s2 * s2) * restWeight[i+n]
+      t = rjk * pow(r2, 2.5) / (s2 * s2 * s2) * rest_weight[i+n]
 
       dx *= t
       dy *= t
@@ -663,27 +612,55 @@ cdef double getRestraintForce(ndarray[double, ndim=2] forces,
   return force
 
 
-def runDynamics(ndarray[double, ndim=2] coords,
-                ndarray[double, ndim=1] masses,
-                ndarray[double, ndim=1] radii,
-                ndarray[double, ndim=1] repDists,
-                ndarray[int, ndim=2] restIndices,
-                ndarray[double, ndim=2] restLimits,
-                ndarray[double, ndim=1] restWeight,
-                ndarray[int, ndim=1] restAmbig,
-                double tRef=1000.0, double tStep=0.001, int nSteps=1000,
-                double fConstR=1.0, double fConstD=25.0, double beta=10.0,
-                #double repDist=2.0, # A heuristic to limit the repulsion list
-                double tTaken=0.0, int printInterval=10000,
-                double tot0=20.458, int nRepMax=0):
+def run_dynamics(ndarray[double, ndim=2] coords,
+                 ndarray[double, ndim=1] masses,
+                 ndarray[double, ndim=1] radii,
+                 ndarray[double, ndim=1] rep_dists,
+                 ndarray[int, ndim=2] rest_indices,
+                 ndarray[double, ndim=2] rest_limits,
+                 ndarray[double, ndim=1] rest_weight,
+                 ndarray[int, ndim=1] rest_ambig,
+                 double tRef=1000.0, double tStep=0.001, int nSteps=1000,
+                 double fConstR=1.0, double fConstD=25.0,
+                 double bead_size=1.0, int n_rep_max=0,
+                 double beta=10.0, double time_taken=0.0,
+                 int print_interval=10000, double tot0=20.458):
 
-  cdef int nRest = len(restIndices)
+  cdef int nRest = len(rest_indices)
   cdef int nCoords = len(coords)
+  cdef int i, j, n, step, nViol, nRep = 0
+  cdef int s1 = 8        # Small bounding box size
+  cdef int s2 = 32 * s1  # Large bounding box size
+  cdef int s0, n_rep_found
 
+  if nCoords >= s2 * s1: # Double split
+    s0 = s2
+  else:
+    s0 = s1
+  
+  if n_rep_max == 0:
+    n_rep_max = nCoords * 10
+
+  cdef double d2, dx, dy, dz, ek, rmsd, tStep0, temp, fDist, fRep
+  cdef double t0 = time.time()
+  cdef double max_radius = radii.max()
+
+  cdef ndarray[double, ndim=1] delta_lim = rep_dists * rep_dists
+  cdef ndarray[double, ndim=2] veloc = numpy.random.normal(0.0, 1.0, (nCoords, 3))
+  cdef ndarray[double, ndim=2] coordsPrev = numpy.array(coords)
+  cdef ndarray[double, ndim=2] accel = numpy.zeros((nCoords, 3))
+  cdef ndarray[double, ndim=2] forces = numpy.zeros((nCoords, 3))
+  cdef ndarray[double, ndim=3] regions_1 = numpy.zeros((1+nCoords/s0, 3, 2))   # Large bounding boxes
+  cdef ndarray[double, ndim=4] regions_2 = numpy.zeros((1+nCoords/s0, s2/s1, 3, 2))   # Small bounding boxes
+
+  cdef ndarray[int, ndim=1] idx_1 = numpy.zeros(len(regions_1), numpy.int32)
+  cdef ndarray[int, ndim=2] idx_2 = numpy.zeros((len(regions_1), s1), numpy.int32)
+  cdef ndarray[int, ndim=2] rep_list = numpy.empty((n_rep_max, 2), numpy.int32)
+   
   if nCoords < 2:
     raise NucCythonError('Too few coodinates')
 
-  indices = set(restIndices.ravel())
+  indices = set(rest_indices.ravel())
   if min(indices) < 0:
     raise NucCythonError('Restraint index negative')
 
@@ -694,87 +671,30 @@ def runDynamics(ndarray[double, ndim=2] coords,
   if nCoords != len(masses):
     raise NucCythonError('Masses list size does not match coordinates')
 
-  if nRest != len(restLimits):
+  if nRest != len(rest_limits):
     raise NucCythonError('Number of restraint index pairs does not match number of restraint limits')
-
-  cdef int i, j, n, step, nViol, nRep = 0
-
-  if not nRepMax:
-    nRepMax = nCoords*10 # Dictates initial size of repulsion list, though this is checked at startup
-
-  cdef double d2, dx, dy, dz, ek, rmsd, tStep0, temp, fDist, fRep
-  cdef ndarray[double, ndim=1] deltaLim = repDists * repDists
-
+  
   tStep0 = tStep * tot0
   beta /= tot0
-
-  cdef ndarray[double, ndim=2] veloc = numpy.random.normal(0.0, 1.0, (nCoords, 3))
+  
   veloc *= sqrt(tRef / getTemp(masses, veloc, nCoords))
   for i, m in enumerate(masses):
     if m == INFINITY:
       veloc[i] = 0
 
-  cdef ndarray[int, ndim=2] repList = numpy.empty((nRepMax, 2), numpy.int32)
-  cdef ndarray[double, ndim=2] coordsPrev = numpy.array(coords)
-  cdef ndarray[double, ndim=2] accel = numpy.zeros((nCoords, 3))
-  cdef ndarray[double, ndim=2] forces = numpy.zeros((nCoords, 3))
-
-  cdef double t0 = time.time()
-
-  ##nRep = getRepulsionList(repList, coords, repDists, radii, masses)
-  # Allocate with some padding
-  ##repList = numpy.resize(repList, (int(nRep * 1.2), 2))
-  ##nRep = getRepulsionList(repList, coords, repDists, radii, masses)
-
-  ##fRep = getRepulsiveForce(repList, forces, coords, nRep,  fConstR, radii)
-  ##fDist = getRestraintForce(forces, coords, restIndices, restLimits,
-  ##                          restWeight, restAmbig, fConstD)
-
-  cdef int s1 = 8        # Small bounding box size
-  cdef int s2 = 32 * s1  # Large bounding box size
-  cdef int s0
-  cdef int n_rep_found
-  
-  if nCoords >= s2 * s1: # Double split
-    s0 = s2
-  else:
-    s0 = s1
-
-  cdef ndarray[double, ndim=3] regions_1 = numpy.zeros((1+nCoords/s0, 3, 2))   # Large bounding boxes
-  cdef ndarray[double, ndim=4] regions_2 = numpy.zeros((1+nCoords/s0, s2/s1, 3, 2))   # Small bounding boxes
-
-  cdef ndarray[int, ndim=1] idx_1 = numpy.zeros(len(regions_1), numpy.int32)
-  cdef ndarray[int, ndim=2] idx_2 = numpy.zeros((len(regions_1), s1), numpy.int32)
-  cdef double max_radius = radii.max()
-
   for step in range(nSteps):
-    """
-    for i in range(nCoords):
-      dx = coords[i,0] - coordsPrev[i,0]
-      dy = coords[i,1] - coordsPrev[i,1]
-      dz = coords[i,2] - coordsPrev[i,2]
-      if dx*dx + dy*dy + dz*dz > deltaLim[i]:
-        nRep = getRepulsionList(repList, coords, repDists, radii, masses)
-        if nRep > len(repList):
-          repList = numpy.resize(repList, (int(nRep * 1.2), 2))
-          nRep = getRepulsionList(repList, coords, repDists, radii, masses)
-        elif nRep < (len(repList) // 2):
-          repList = numpy.resize(repList, (int(nRep * 1.2), 2))
-
-        for i in range(nCoords):
-          coordsPrev[i,0] = coords[i,0]
-          coordsPrev[i,1] = coords[i,1]
-          coordsPrev[i,2] = coords[i,2]
-        break # Already re-calculated, no need to check more
-"""
 
     if step == 0:
+      nRep, n_rep_found = getRepulsionList(rep_list, coords, regions_1, regions_2, idx_1, idx_2,
+                                           s1, s2, nCoords, n_rep_max, rep_dists, radii, max_radius)
 
-      nRep, n_rep_found = getRepulsionList(repList, coords, regions_1, regions_2, idx_1, idx_2, s1, s2, nCoords, nRepMax, repDists, radii, max_radius)
-
-      if n_rep_found > nRepMax:
-        nRepMax = numpy.int32(n_rep_found * 1.1)
-        repList = numpy.zeros((nRepMax, 2), numpy.int32) 
+      if n_rep_found > n_rep_max:
+        #print "Adjust A", nRep, n_rep_found, n_rep_max
+        n_rep_max = numpy.int32(n_rep_found * 1.2)
+        rep_list = numpy.zeros((n_rep_max, 2), numpy.int32)
+        
+        nRep, n_rep_found = getRepulsionList(rep_list, coords, regions_1, regions_2, idx_1, idx_2,
+                                             s1, s2, nCoords, n_rep_max, rep_dists, radii, max_radius)
 
       for i in range(nCoords):
         coordsPrev[i,0] = coords[i,0]
@@ -784,8 +704,8 @@ def runDynamics(ndarray[double, ndim=2] coords,
         forces[i,1] = 0.0
         forces[i,2] = 0.0
 
-      fRep = getRepulsiveForce(repList, forces, coords, nRep,  fConstR, radii)
-      fDist = getRestraintForce(forces, coords, restIndices, restLimits, restWeight, restAmbig, fConstD)
+      fRep = getRepulsiveForce(rep_list, forces, coords, nRep,  fConstR, radii)
+      fDist = getRestraintForce(forces, coords, rest_indices, rest_limits, rest_weight, rest_ambig, fConstD)
 
       for i in range(nCoords):
         accel[i,0] = forces[i,0] / masses[i]
@@ -803,21 +723,23 @@ def runDynamics(ndarray[double, ndim=2] coords,
         if d2 > maxDelta:
           maxDelta = d2
   
-          if maxDelta > deltaLim[i]:
+          if maxDelta > delta_lim[i]:
             break            
 
-      if maxDelta > deltaLim.min():
-        nRep, n_rep_found = getRepulsionList(repList, coords, regions_1, regions_2, idx_1, idx_2, s1, s2, nCoords, nRepMax, repDists, radii, max_radius) # Handle errors
+      if maxDelta > delta_lim.min():
+        nRep, n_rep_found = getRepulsionList(rep_list, coords, regions_1, regions_2, idx_1, idx_2,
+                                             s1, s2, nCoords, n_rep_max, rep_dists, radii, max_radius) # Handle errors
 
-        if n_rep_found > nRepMax:
-          nRepMax = numpy.int32(n_rep_found * 1.1)
-          repList = numpy.zeros((nRepMax, 2), numpy.int32)
+        if n_rep_found > n_rep_max:
+          #print "Adjust B", nRep, n_rep_found, n_rep_max
+          n_rep_max = numpy.int32(n_rep_found * 1.2)
+          rep_list = numpy.zeros((n_rep_max, 2), numpy.int32)
 
         for i in range(nCoords):
           coordsPrev[i,0] = coords[i,0]
           coordsPrev[i,1] = coords[i,1]
           coordsPrev[i,2] = coords[i,2]
-      
+
     updateMotion(masses, forces, accel, veloc, coords, nCoords, tRef, tStep0, beta)
 
     for i in range(nCoords):
@@ -825,19 +747,20 @@ def runDynamics(ndarray[double, ndim=2] coords,
       forces[i,1] = 0.0
       forces[i,2] = 0.0
 
-    fRep  = getRepulsiveForce(repList, forces, coords, nRep, fConstR, radii)
-    fDist = getRestraintForce(forces, coords, restIndices, restLimits,
-                              restWeight, restAmbig, fConstD)
+    fRep  = getRepulsiveForce(rep_list, forces, coords, nRep, fConstR, radii)
+    fDist = getRestraintForce(forces, coords, rest_indices, rest_limits,
+                              rest_weight, rest_ambig, fConstD)
 
     updateVelocity(masses, forces, accel, veloc, nCoords, tRef, tStep0,  beta)
 
-    if (printInterval > 0) and step % printInterval == 0:
+    if (print_interval > 0) and step % print_interval == 0:
       temp = getTemp(masses, veloc, nCoords)
-      nViol, rmsd = getStats(restIndices, restLimits, coords, nRest)
+      nViol, rmsd = getStats(rest_indices, rest_limits, coords, nRest)
+      
+      data = (tRef/(bead_size*bead_size), temp/(bead_size*bead_size), fRep, fDist, rmsd, nViol, nRep, time.time()-t0)
+      print('ttemp:%5d temp:%5d fRep:%7.2e fDist:%7.2e rmsd:%7.2lf nViol:%5d nRep:%7d etime:%5.2f' % data)
+      sys.stdout.flush()
+      
+    time_taken += tStep
 
-      data = (temp, fRep, fDist, rmsd, nViol, nRep)
-      print('temp:%7.2lf  fRep:%7.2lf  fDist:%7.2lf  rmsd:%7.2lf  nViol:%5d  nRep:%5d' % data)
-
-    tTaken += tStep
-
-  return tTaken, n_rep_found
+  return time_taken, n_rep_found
