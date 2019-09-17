@@ -97,10 +97,17 @@ def load_ncc_file(file_path):
     
   contact_dict = {}
   chromosomes = set()
+  ambig_group = 0
     
   for line in file_obj:
     chr_a, f_start_a, f_end_a, start_a, end_a, strand_a, chr_b, f_start_b, f_end_b, start_b, end_b, strand_b, ambig_group, pair_id, swap_pair = line.split()
     
+    if '.' in ambig_group: # Updated NCC format
+      if int(float(ambig_group)) > 0:
+        ambig_group += 1
+    else:
+      ambig_group = int(ambig_group) 
+          
     if strand_a == '+':
       pos_a = int(f_start_a)
     else:
@@ -123,7 +130,7 @@ def load_ncc_file(file_path):
       contact_dict[chr_a][chr_b] = [] 
       chromosomes.add(chr_b)
         
-    contact_dict[chr_a][chr_b].append((pos_a, pos_b, num_obs, int(ambig_group)))
+    contact_dict[chr_a][chr_b].append((pos_a, pos_b, num_obs, ambig_group))
    
   file_obj.close()
   
