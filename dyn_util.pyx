@@ -15,7 +15,7 @@ class NucCythonError(Exception):
     Exception.__init__(self, err)
 
 
-cdef getRepulsionList(ndarray[int,   ndim=2] rep_list,
+cdef getRepulsionList(ndarray[long,   ndim=2] rep_list,
                       ndarray[double, ndim=2] coords,
                       ndarray[double, ndim=3] regions_1,
                       ndarray[double, ndim=4] regions_2,
@@ -460,7 +460,7 @@ cdef void updateVelocity(ndarray[double, ndim=1] masses,
     veloc[i,2] += 0.5 * tStep * (forces[i,2] / masses[i] + r * veloc[i,2] - accel[i,2])
 
 
-cdef double getRepulsiveForce(ndarray[int,   ndim=2] rep_list,
+cdef double getRepulsiveForce(ndarray[long,   ndim=2] rep_list,
                               ndarray[double, ndim=2] forces,
                               ndarray[double, ndim=2] coords,
                               int nRep, double fConst,
@@ -655,7 +655,7 @@ def run_dynamics(ndarray[double, ndim=2] coords,
 
   cdef ndarray[int, ndim=1] idx_1 = numpy.zeros(len(regions_1), numpy.int32)
   cdef ndarray[int, ndim=2] idx_2 = numpy.zeros((len(regions_1), s1), numpy.int32)
-  cdef ndarray[int, ndim=2] rep_list = numpy.empty((n_rep_max, 2), numpy.int32)
+  cdef ndarray[long, ndim=2] rep_list = numpy.empty((n_rep_max, 2), numpy.int64)
    
   if nCoords < 2:
     raise NucCythonError('Too few coodinates')
@@ -690,8 +690,8 @@ def run_dynamics(ndarray[double, ndim=2] coords,
 
       if n_rep_found > n_rep_max:
         #print "Adjust A", nRep, n_rep_found, n_rep_max
-        n_rep_max = numpy.int32(n_rep_found * 1.2)
-        rep_list = numpy.zeros((n_rep_max, 2), numpy.int32)
+        n_rep_max = numpy.int32(min(n_rep_found * 1.2, 100000000))
+        rep_list = numpy.zeros((n_rep_max, 2), numpy.int64)
         
         nRep, n_rep_found = getRepulsionList(rep_list, coords, regions_1, regions_2, idx_1, idx_2,
                                              s1, s2, nCoords, n_rep_max, rep_dists, radii, max_radius)
@@ -732,8 +732,8 @@ def run_dynamics(ndarray[double, ndim=2] coords,
 
         if n_rep_found > n_rep_max:
           #print "Adjust B", nRep, n_rep_found, n_rep_max
-          n_rep_max = numpy.int32(n_rep_found * 1.2)
-          rep_list = numpy.zeros((n_rep_max, 2), numpy.int32)
+          n_rep_max = numpy.int32(min(n_rep_found * 1.2, 100000000))
+          rep_list = numpy.zeros((n_rep_max, 2), numpy.int64)
 
         for i in range(nCoords):
           coordsPrev[i,0] = coords[i,0]

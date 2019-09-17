@@ -141,14 +141,22 @@ def load_ncc_file(file_path, offset=0):
     f_open = open
 
   contact_dict = {}
+  ambig_group = 0
 
   with f_open(file_path) as file_obj:
     n = 0
     for line in file_obj:
       if line.startswith('#'):
         continue
+        
       chr_a, f_start_a, f_end_a, start_a, end_a, strand_a, chr_b, f_start_b, f_end_b, start_b, end_b, strand_b, ambig_group, pair_id, swap_pair = line.split()
-
+      
+      if '.' in ambig_group: # Updated NCC format
+        if int(float(ambig_group)) > 0:
+          ambig_group += 1
+      else:
+        ambig_group = int(ambig_group)
+       
       pos_a = int(f_start_a if strand_a == '+' else f_end_a)
       pos_b = int(f_start_b if strand_b == '+' else f_end_b)
 
@@ -162,7 +170,7 @@ def load_ncc_file(file_path, offset=0):
       if chr_b not in contact_dict[chr_a]:
         contact_dict[chr_a][chr_b] = []
 
-      contact_dict[chr_a][chr_b].append(((pos_a, pos_b), int(ambig_group)+offset, n+offset))
+      contact_dict[chr_a][chr_b].append(((pos_a, pos_b), ambig_group+offset, n+offset))
       n += 1
 
   nmax = 1000000
@@ -1133,7 +1141,6 @@ def anneal_genome(contact_dict, num_models, particle_size,
   restraint_order = argsort(restraints['ambiguity'])
   restraints = restraints[restraint_order]
   ambiguity = calc_ambiguity_offsets(restraints['ambiguity'])
-      
   
   # Annealing parameters
   temp_start = anneal_params['temp_start']
@@ -1457,7 +1464,7 @@ def align_chromo_coords(coords_dict, seq_pos_dict):
   
   return coords_dict
   
-def remove_models(coords_dict, seq_pos_dict):
+def remove_models(coords_dict, seq_pos_dict, req_num_models):
       
   from numpy import array
 
@@ -1466,7 +1473,7 @@ def remove_models(coords_dict, seq_pos_dict):
   model_rmsds_indices = [(model_rmsd, n) for (n, model_rmsd) in enumerate(model_rmsds)]
   model_rmsds_indices.sort()
   indices = array([ind for (rmsd, ind) in model_rmsds_indices])
-  indices = indices[:len(indices)//2]  # keep half the models
+  indices = indices[:req_num_models]
   coord_models = coord_models[indices]
   
   coords_dict = convert_models_to_dict(coord_models, coords_dict, seq_pos_dict)
@@ -1540,7 +1547,9 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
                           #resolve_homo_ambig=False, resolve_3d_ambig=False):
 
   from time import time
-
+  
+  req_num_models = num_models
+  
   # Load single-cell Hi-C data from NCC contact file, as output from NucProcess
   contact_dict = load_ncc_file(ncc_file_path)
   info('Total number of contacts = %d' % contact_count(contact_dict))
@@ -1582,7 +1591,6 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
       chromo = next(iter(start_coords)) # picks out arbitrary chromosome
       num_models = len(start_coords[chromo])
     
-  removed_models = False
   for stage, particle_size in enumerate(particle_sizes):
 
     info("Running structure calculation stage %d (%d kb)" % (stage+1, particle_size//1000))
@@ -1606,12 +1614,11 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
     
     if start_coords is not None:
       
-      if particle_size <= remove_models_size and not removed_models:
-        start_coords = remove_models(start_coords, prev_seq_pos)
+      if particle_size <= remove_models_size and num_models > req_num_models:
+        start_coords = remove_models(start_coords, prev_seq_pos, req_num_models)
         chromo = next(iter(start_coords)) # picks out arbitrary chromosome
         num_models = len(start_coords[chromo])
-        info('Removed models')
-        removed_models = True
+        info('Removed %d models. Calculating %d' % (num_models-req_num_models, req_num_models))
         
       if (have_diploid or ncc2_file_path) and particle_size <= struct_ambig_size:
         stage_contact_dict = resolve_3d_ambiguous(stage_contact_dict, prev_seq_pos, start_coords)
@@ -1628,7 +1635,12 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
       # Only use contacts which are supported by others nearby in sequence, in the initial instance
       stage_contact_dict = remove_isolated_contacts(stage_contact_dict, threshold_cis=isolation_threshold_cis,
                                             threshold_trans=isolation_threshold_trans)
-
+      
+      if particle_size > remove_models_size:
+        num_models = 2 * req_num_models
+      else:
+        num_models = req_num_models
+            
     threshold = remove_violated_threshold(particle_size, bead_size)
     if threshold:
       stage_contact_dict = remove_violated_contacts(stage_contact_dict, start_coords, prev_seq_pos,
