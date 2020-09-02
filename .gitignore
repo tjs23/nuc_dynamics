@@ -1,0 +1,4 @@
+*.c
+build/
+example_chromo_data/
+test/

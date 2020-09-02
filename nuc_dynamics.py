@@ -81,6 +81,70 @@ def parallel_split_job(target_func, split_data, common_args, num_cpu=MAX_CORES, 
       proc.join()
 
 
+def load_pairs_file(file_path):
+  """Load 4DCIC pairs file"""
+  file_obj = open_file(file_path)
+
+  contact_dict = {}
+  chromosomes = set()
+
+  num_obs = 1
+  ambig_group = 0
+
+  for line in file_obj:
+    if line.startswith("#"): continue
+    read_id, chr_a, f_start_a, chr_b, f_start_b, strand_a, strand_b = line.split()
+    pos_a = int(f_start_a)
+    pos_b = int(f_start_b)
+
+    if chr_a > chr_b:
+      chr_a, chr_b = chr_b, chr_a
+      pos_a, pos_b = pos_b, pos_a
+
+    if chr_a not in contact_dict:
+      contact_dict[chr_a] = {}
+      chromosomes.add(chr_a)
+
+    if chr_b not in contact_dict[chr_a]:
+      contact_dict[chr_a][chr_b] = [] 
+      chromosomes.add(chr_b)
+        
+    contact_dict[chr_a][chr_b].append((pos_a, pos_b, num_obs, ambig_group))
+   
+  file_obj.close()
+  
+  chromo_limits = {}
+    
+  for chr_a in contact_dict:
+    for chr_b in contact_dict[chr_a]:
+      contacts = np.array(contact_dict[chr_a][chr_b]).T
+      contact_dict[chr_a][chr_b] = contacts
+      
+      seq_pos_a = contacts[0]
+      seq_pos_b = contacts[1]
+      
+      min_a = min(seq_pos_a)
+      max_a = max(seq_pos_a)
+      min_b = min(seq_pos_b)
+      max_b = max(seq_pos_b)
+        
+      if chr_a in chromo_limits:
+        prev_min, prev_max = chromo_limits[chr_a]
+        chromo_limits[chr_a] = [min(prev_min, min_a), max(prev_max, max_a)]
+      else:
+        chromo_limits[chr_a] = [min_a, max_a]
+      
+      if chr_b in chromo_limits:
+        prev_min, prev_max = chromo_limits[chr_b]
+        chromo_limits[chr_b] = [min(prev_min, min_b), max(prev_max, max_b)]
+      else:
+        chromo_limits[chr_b] = [min_b, max_b]
+
+  chromosomes = sorted(chromosomes)      
+
+  return chromosomes, chromo_limits, contact_dict
+
+
 def load_ncc_file(file_path):
   """Load chromosome and contact data from NCC format file, as output from NucProcess"""
   
@@ -255,7 +319,8 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
     seqPrev = None
     
     for k, chromo in enumerate(sort_chromos):
-      chain_code = chr(ord('a')+k)            
+      #chain_code = chr(ord('a')+k)            
+      chain_code = str(k)
       
       tlc = chromo
       while len(tlc) < 2:
@@ -680,7 +745,7 @@ def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, part
   print('Saved structure file to: %s' % out_file_path)
 
 
-def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, anneal_params,
+def calc_genome_structure(input_file_path, out_file_path, general_calc_params, anneal_params,
                           particle_sizes, num_models=5, isolation_threshold=2e6,
                           out_format=N3D, num_cpu=MAX_CORES,
                           start_coords_path=None, save_intermediate=False):
@@ -688,7 +753,10 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
   from time import time
 
   # Load single-cell Hi-C data from NCC contact file, as output from NucProcess
-  chromosomes, chromo_limits, contact_dict = load_ncc_file(ncc_file_path)
+  if '.ncc' in os.path.split(input_file_path)[1]:
+    chromosomes, chromo_limits, contact_dict = load_ncc_file(input_file_path)
+  else:
+    chromosomes, chromo_limits, contact_dict = load_pairs_file(input_file_path)
 
   # Only use contacts which are supported by others nearby in sequence, in the initial instance
   remove_isolated_contacts(contact_dict, threshold=isolation_threshold)
@@ -834,8 +902,8 @@ if __name__ == '__main__':
   arg_parse = ArgumentParser(prog=PROG_NAME, description=DESCRIPTION,
                              epilog=epilog, prefix_chars='-', add_help=True)
 
-  arg_parse.add_argument('ncc_path', nargs=1, metavar='NCC_FILE',
-                         help='Input NCC format file containing single-cell Hi-C contact data, e.g. use the demo data at example_chromo_data/Cell_1_contacts.ncc')
+  arg_parse.add_argument('input_file', nargs=1, metavar='INPUT_FILE',
+                         help='Input NCC/PAIRs format file containing single-cell Hi-C contact data, e.g. use the demo data at example_chromo_data/Cell_1_contacts.ncc')
 
   arg_parse.add_argument('-o', metavar='OUT_FILE',
                          help='Optional name of output file for 3D coordinates in N3D or PDB format (see -f option). If not set this will be auto-generated from the input file name')
@@ -899,11 +967,11 @@ if __name__ == '__main__':
   
   args = vars(arg_parse.parse_args())
   
-  ncc_file_path = args['ncc_path'][0]
+  input_file_path = args['input_file'][0]
   
   save_path = args['o']
   if save_path is None:
-    save_path = os.path.splitext(ncc_file_path)[0]
+    save_path = os.path.splitext(input_file_path)[0]
     
   particle_sizes = args['s']
   particle_sizes = sorted([x * 1e6 for x in particle_sizes if x > 0], reverse=True)
@@ -985,7 +1053,7 @@ if __name__ == '__main__':
   
   isolation_threshold *= 1e6
   
-  calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
+  calc_genome_structure(input_file_path, save_path, general_calc_params, anneal_params,
                         particle_sizes, num_models, isolation_threshold, out_format, num_cpu,
                         start_coords_path, save_intermediate)
 
