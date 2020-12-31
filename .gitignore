@@ -1,4 +1,4 @@
 *.c
+*.so
 build/
-example_chromo_data/
 test/

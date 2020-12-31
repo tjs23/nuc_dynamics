@@ -279,7 +279,7 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
   
   sort_chromos = []
   for chromo in chromosomes:
-    if chromo[:3] == 'chr':
+    if chromo[:3].lower() == 'chr':
       key = chromo[3:]
     else:
       key = chromo
@@ -319,10 +319,11 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
     seqPrev = None
     
     for k, chromo in enumerate(sort_chromos):
-      #chain_code = chr(ord('a')+k)            
-      chain_code = str(k)
+      chain_code = chr(ord('A')+k)            
       
       tlc = chromo
+      if tlc.lower().startswith("chr"):
+        tlc = tlc[3:]
       while len(tlc) < 2:
         tlc = '_' + tlc
       
