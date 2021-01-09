@@ -1,7 +1,8 @@
+import os.path as osp
 from ..util.const import N3D, PDB
 
-def export_n3d_coords(file_path, coords_dict, seq_pos_dict):
-    
+def export_n3d_coords(file_path, coords_dict, seq_pos_dict, *args, **kwargs):
+
     file_obj = open(file_path, 'w')
     write = file_obj.write
     
@@ -147,20 +148,27 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
     file_obj.close()
 
 
-def export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, particle_size):
-    
+def split_paraticles(coords_dict, particle_seq_pos):
+    chromosomes = list(coords_dict.keys())
+    for chr_ in chromosomes:
+        yield chr_, {chr_: coords_dict[chr_]}, {chr_: particle_seq_pos[chr_]}
+
+
+def export_coords(
+        out_format,
+        out_file_path, coords_dict,
+        particle_seq_pos, particle_size,
+        split_by_chromo=False):
+
     # Save final coords as N3D or PDB format file
-    
-    if out_format == PDB:
-        if not out_file_path.endswith(PDB):
-            out_file_path = '%s.%s' % (out_file_path, PDB)
-    
-        export_pdb_coords(out_file_path, coords_dict, particle_seq_pos, particle_size)
- 
+    if not out_file_path.endswith(out_format):
+        out_file_path = '%s.%s' % (out_file_path, out_format)
+    export_func = export_pdb_coords if out_format == PDB else export_n3d_coords
+    if split_by_chromo:
+        for chr_, coords, seq_pos in split_paraticles(coords_dict, particle_seq_pos):
+            prefix, ext = osp.splitext(out_file_path)
+            outpath = f"{prefix}.{chr_}{ext}"
+            export_func(outpath, coords, seq_pos, particle_size)
     else:
-        if not out_file_path.endswith(N3D):
-            out_file_path = '%s.%s' % (out_file_path, N3D)
-            
-        export_n3d_coords(out_file_path, coords_dict, particle_seq_pos)
-        
-    print('Saved structure file to: %s' % out_file_path)
+        export_func(out_file_path, coords_dict, particle_seq_pos, particle_size)
+        print('Saved structure file to: %s' % out_file_path)

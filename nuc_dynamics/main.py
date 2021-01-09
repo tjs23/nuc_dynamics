@@ -14,7 +14,7 @@ DESCRIPTION = 'Single-cell Hi-C genome and chromosome structure calculation modu
 
 def calc_genome_structure(input_file_path, out_file_path, general_calc_params, anneal_params,
                           particle_sizes, num_models=5, isolation_threshold=2e6,
-                          out_format=N3D, num_cpu=MAX_CORES,
+                          out_format=N3D, split_chromosome=False, num_cpu=MAX_CORES,
                           start_coords_path=None, save_intermediate=False):
 
     from time import time
@@ -74,7 +74,7 @@ def calc_genome_structure(input_file_path, out_file_path, general_calc_params, a
             prev_seq_pos = particle_seq_pos
 
     # Save final coords
-    export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, particle_size)
+    export_coords(out_format, out_file_path, coords_dict, particle_seq_pos, particle_size, split_chromosome)
 
 
 
@@ -110,7 +110,7 @@ def demo_calc_genome_structure():
     isolation_threshold=2e6
     
     calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
-                                                particle_sizes, num_models, isolation_threshold, out_format='pdb')
+                          particle_sizes, num_models, isolation_threshold, out_format='pdb')
 
 
 test_imports()
@@ -155,6 +155,12 @@ if __name__ == '__main__':
     arg_parse.add_argument(
         '-f', metavar='OUT_FORMAT', default=N3D,
         help='File format for output 3D coordinate file. Default: "%s". Also available: "%s"' % (N3D, PDB))
+
+    arg_parse.add_argument(
+        '-split_chromosome',
+        default=False,
+        action='store_true',
+        help='Split the output by chromosomes.')
 
     arg_parse.add_argument(
         '-s', nargs='+', default=[8.0,4.0,2.0,0.4,0.2,0.1], metavar='Mb_SIZE', type=float,
@@ -231,6 +237,7 @@ if __name__ == '__main__':
     
     num_models = args['m']
     out_format = args['f'].lower()
+    split_chromosome = args['split_chromosome']
     num_cpu = args['cpu'] or 1
     dist_power_law = args['pow']
     contact_dist_lower = args['lower']
@@ -306,6 +313,6 @@ if __name__ == '__main__':
     isolation_threshold *= 1e6
 
     calc_genome_structure(input_file_path, save_path, general_calc_params, anneal_params,
-                          particle_sizes, num_models, isolation_threshold, out_format, num_cpu,
-                          start_coords_path, save_intermediate)
+                          particle_sizes, num_models, isolation_threshold, out_format, split_chromosome,
+                          num_cpu, start_coords_path, save_intermediate)
 
