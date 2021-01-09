@@ -97,8 +97,8 @@ $ nuc_dynamics.sh example_chromo_data/Cell_1_contacts.ncc -m 10 -f pdb -o Cell_1
 
 ## Example Data
 
-Example NCC format contact data to demonstrate NucDynamics is avaiable in the
-example_chromo_data sub-directory, as a .tar.gz archive which must be extracted
+Example NCC/PAIRS format contact data to demonstrate NucDynamics is avaiable in the
+example_chromo_data sub-directory, as a .gz compressed file which must be extracted
 before use. 
 
 ## N3D coordinate format
