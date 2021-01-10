@@ -260,13 +260,13 @@ cdef getRepulsionList(ndarray[int, ndim=2] rep_list,
                 for a0 in range(s3):
                     
                     a = idx_2[p,a0]
-                    a1 = p * s2 + a * s1             # Region start
-                    a2 = min(nCoords, a1 + s1)    # Region limit
+                    a1 = p * s2 + a * s1       # Region start
+                    a2 = min(nCoords, a1 + s1) # Region limit
  
                     if p == q:
                         n2 = a0 # Only compare other ones in same big box
                     else:
-                        n2 = 0    # Compare all in other big box
+                        n2 = 0  # Compare all in other big box
  
                     # Compare between regions
                     for b0 in range(n2, s3):
@@ -808,12 +808,12 @@ def runDynamics(ndarray[double, ndim=2] coords,
     veloc = numpy.random.normal(0.0, 1.0, (nCoords, 3))
     veloc *= sqrt(tRef / getTemp(masses, veloc, nCoords))
 
-    cdef ndarray[int,        ndim=2] rep_list = numpy.zeros((nRepMax, 2), numpy.int32)    
+    cdef ndarray[int, ndim=2] rep_list = numpy.zeros((nRepMax, 2), numpy.int32)    
     cdef ndarray[double, ndim=2] coordsPrev = numpy.empty((nCoords, 3)) # typing this array important for speed 
-    cdef ndarray[double, ndim=2] accel = numpy.zeros((nCoords, 3))            # this less so
+    cdef ndarray[double, ndim=2] accel = numpy.zeros((nCoords, 3)) # this less so
     cdef ndarray[double, ndim=2] forces = numpy.empty((nCoords, 3))
     
-    cdef int s1 = 8                # Small bounding box size
+    cdef int s1 = 8          # Small bounding box size
     cdef int s2 = 32 * s1    # Large bounding box size
     cdef int s0
     cdef int n_rep_found
@@ -823,8 +823,8 @@ def runDynamics(ndarray[double, ndim=2] coords,
     else:
         s0 = s1
         
-    cdef ndarray[double, ndim=3] regions_1 = numpy.zeros((1+nCoords/s0, 3, 2))     # Large bounding boxes
-    cdef ndarray[double, ndim=4] regions_2 = numpy.zeros((1+nCoords/s0, s2/s1, 3, 2))     # Small bounding boxes
+    cdef ndarray[double, ndim=3] regions_1 = numpy.zeros((1+nCoords/s0, 3, 2))  # Large bounding boxes
+    cdef ndarray[double, ndim=4] regions_2 = numpy.zeros((1+nCoords/s0, s2/s1, 3, 2))  # Small bounding boxes
         
     cdef ndarray[int, ndim=1] idx_1 = numpy.zeros(len(regions_1), numpy.int32)
     cdef ndarray[int, ndim=2] idx_2 = numpy.zeros((len(regions_1), s1), numpy.int32)
@@ -891,17 +891,17 @@ def runDynamics(ndarray[double, ndim=2] coords,
             forces[i,1] = 0.0
             forces[i,2] = 0.0
 
-        fRep    = getRepulsiveForce(rep_list, forces, coords, nRep, fConstR, radii)
+        fRep = getRepulsiveForce(rep_list, forces, coords, nRep, fConstR, radii)
         fDist = getRestraintForce(forces, coords, restIndices, restLimits, restAmbig, nRest, fConstD)
 
-        updateVelocity(masses, forces, accel, veloc, nCoords, tRef, tStep0,    beta)
+        updateVelocity(masses, forces, accel, veloc, nCoords, tRef, tStep0, beta)
 
         if (printInterval > 0) and step % printInterval == 0:
             temp = getTemp(masses, veloc, nCoords)
             nViol, rmsd = getStats(restIndices, restLimits, coords, nRest)
             
             data = (temp, fRep, fDist, rmsd, nViol, nRep)
-            print('temp:%7.2lf    fRep:%7.2lf    fDist:%7.2lf    rmsd:%7.2lf    nViol:%5d    nRep:%5d' % data)
+            print('temp:%7.2lf  fRep:%7.2lf  fDist:%7.2lf  rmsd:%7.2lf  nViol:%5d  nRep:%5d' % data)
 
         tTaken += tStep
 
@@ -919,16 +919,16 @@ def calc_restraints(chromosomes, contact_dict, int particle_size=10000,
 
     cdef int i, j, k, a, b, nc, n, na, nb
     cdef double dist
-    cdef ndarray[long, ndim=2] contacts            # Contact matrix (3:(posA, posB, nObs), nContacts)
-    cdef ndarray[double, ndim=2] restraints    # Distance restraints (6:(), nRestraints)
-    cdef ndarray[int, ndim=2] bin_matrix         # Temp array for binned contacts
+    cdef ndarray[long, ndim=2] contacts      # Contact matrix (3:(posA, posB, nObs), nContacts)
+    cdef ndarray[double, ndim=2] restraints  # Distance restraints (6:(), nRestraints)
+    cdef ndarray[int, ndim=2] bin_matrix     # Temp array for binned contacts
     cdef ndarray[int, ndim=1] seq_pos_a
     cdef ndarray[int, ndim=1] seq_pos_b
-    cdef ndarray[int, ndim=2] limits                 # shape: (chromoId, 2:[start, end])
+    cdef ndarray[int, ndim=2] limits         # shape: (chromoId, 2:[start, end])
 
     num_contacts_dict = {} # Total num contacts for each chromosomes
-    pos_dict = {}                    # Start sequence position for each particle in each chromosome
-    restraint_dict = {}        # Final restraints for each pair of chromosomes
+    pos_dict = {}          # Start sequence position for each particle in each chromosome
+    restraint_dict = {}    # Final restraints for each pair of chromosomes
     
     chromos = set(chromosomes)
     nc = len(chromosomes)

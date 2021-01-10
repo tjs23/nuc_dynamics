@@ -93,12 +93,7 @@ def load_pairs_file(file_path):
 def load_ncc_file(file_path):
     """Load chromosome and contact data from NCC format file, as output from NucProcess"""
     
-    if file_path.endswith('.gz'):
-        import gzip
-        file_obj = gzip.open(file_path)
-    
-    else:
-        file_obj = open(file_path) 
+    file_obj = open_file(file_path)
     
     # Observations are treated individually in single-cell Hi-C,
     # i.e. no binning, so num_obs always 1 for each contact
@@ -180,11 +175,11 @@ def load_n3d_coords(file_path):
     Load genome structure coordinates and particle sequence positions from an N3D format file.
 
     Args:
-            file_path: str ; Location of N3D (text) format file
+        file_path: str ; Location of N3D (text) format file
 
     Returns:
-            dict {str:ndarray(n_coords, int)}                                    ; {chromo: seq_pos_array}
-            dict {str:ndarray((n_models, n_coords, 3), float)} ; {chromo: coord_3d_array}
+        dict {str:ndarray(n_coords, int)} ; {chromo: seq_pos_array}
+        dict {str:ndarray((n_models, n_coords, 3), float)} ; {chromo: coord_3d_array}
 
     """
     seq_pos_dict = {}
@@ -217,7 +212,7 @@ def load_n3d_coords(file_path):
                chromo_seq_pos = np.empty(n_coords, 'int32')
                chromo_coords = np.empty((n_models, n_coords, 3), float)
 
-               coords_dict[chromo]    = chromo_coords
+               coords_dict[chromo] = chromo_coords
                seq_pos_dict[chromo] = chromo_seq_pos
 
                check = (n_models * 3) + 1

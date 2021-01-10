@@ -65,20 +65,21 @@ def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
         
         # Calculate distance restrains from contact data     
         restraint_dict, seq_pos_dict = dyn_util.calc_restraints(chromosomes, contact_dict, particle_size,
-                                                                                                     scale=1.0, exponent=general_calc_params['dist_power_law'],
-                                                                                                     lower=general_calc_params['contact_dist_lower'],
-                                                                                                     upper=general_calc_params['contact_dist_upper'])
+            scale=1.0, exponent=general_calc_params['dist_power_law'],
+            lower=general_calc_params['contact_dist_lower'],
+            upper=general_calc_params['contact_dist_upper'])
         
         # Concatenate chromosomal data into a single array of particle restraints
         # for structure calculation. Add backbone restraints between seq. adjasent particles.
-        restraint_indices, restraint_dists = dyn_util.concatenate_restraints(restraint_dict, seq_pos_dict, particle_size,
-                                                                                                                                general_calc_params['backbone_dist_lower'],
-                                                                                                                                general_calc_params['backbone_dist_upper'])
+        restraint_indices, restraint_dists = dyn_util.concatenate_restraints(
+            restraint_dict, seq_pos_dict, particle_size,
+            general_calc_params['backbone_dist_lower'],
+            general_calc_params['backbone_dist_upper'])
  
         # Setup starting structure
         if (start_coords is None) or (prev_seq_pos_dict is None):
             coords = get_random_coords(seq_pos_dict, chromosomes, num_models,
-                                                                 general_calc_params['random_radius'])
+                                       general_calc_params['random_radius'])
             
             num_coords = coords.shape[1]
                         
@@ -135,7 +136,7 @@ def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
              
         # Update coordinates in the annealing schedule which is applied to each model in parallel
         common_args = [anneal_schedule, masses, radii, restraint_indices, restraint_dists,
-                                     ambiguity, temp, time_step, dyn_steps, repulse, n_rep_max]
+                       ambiguity, temp, time_step, dyn_steps, repulse, n_rep_max]
         
         task_data = [(m, coords[m]) for m in range(len(coords))]
         

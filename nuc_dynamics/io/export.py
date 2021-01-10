@@ -37,11 +37,11 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
     line_format = '%-80.80s\n'
     
     if extended:
-        pdb_format = '%-6.6s%5.1d %4.4s%s%3.3s %s%4.1d%s     %8.3f%8.3f%8.3f%6.2f%6.2f                    %2.2s    %10d\n'
-        ter_format = '%-6.6s%5.1d            %s %s%4.1d%s                                                                                                         %10d\n'
+        pdb_format = '%-6.6s%5.1d %4.4s%s%3.3s %s%4.1d%s   %8.3f%8.3f%8.3f%6.2f%6.2f          %2.2s  %10d\n'
+        ter_format = '%-6.6s%5.1d      %s %s%4.1d%s                                                     %10d\n'
     else:
-        pdb_format = '%-6.6s%5.1d %4.4s%s%3.3s %s%4.1d%s     %8.3f%8.3f%8.3f%6.2f%6.2f                    %2.2s    \n'
-        ter_format = '%-6.6s%5.1d            %s %s%4.1d%s                                                                                                         \n'
+        pdb_format = '%-6.6s%5.1d %4.4s%s%3.3s %s%4.1d%s   %8.3f%8.3f%8.3f%6.2f%6.2f          %2.2s  \n'
+        ter_format = '%-6.6s%5.1d      %s %s%4.1d%s                                                     \n'
 
     file_obj = open(file_path, 'w')
     write = file_obj.write
@@ -80,9 +80,10 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
     file_obj.write(line_format % 'REMARK 210')
     
     pos_chromo = {}
-    
+
+    c = 0
     for m in range(num_models):
-        line = 'MODEL         %4d' % (m+1)
+        line = 'MODEL     %4d' % (m+1)
         write(line_format    % line)
         
         c = 0
@@ -137,9 +138,9 @@ def export_pdb_coords(file_path, coords_dict, seq_pos_dict, particle_size, scale
                     
                 write(line)
  
-        write(line_format    % 'ENDMDL')
+        write(line_format % 'ENDMDL')
  
-    for i in range(c-2):
+    for i in range(c - 1):
         if pos_chromo[i+1] == pos_chromo[i+2]:
             line = 'CONECT%5.1d%5.1d' % (i+1, i+2)
             write(line_format    % line)
