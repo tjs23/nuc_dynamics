@@ -62,20 +62,20 @@ def anneal_genome(chromosomes, contact_dict, num_models, particle_size,
         
         random.seed(general_calc_params['random_seed'])
         particle_size = np.int32(particle_size)
-        
+
         # Calculate distance restrains from contact data     
         restraint_dict, seq_pos_dict = dyn_util.calc_restraints(chromosomes, contact_dict, particle_size,
             scale=1.0, exponent=general_calc_params['dist_power_law'],
             lower=general_calc_params['contact_dist_lower'],
             upper=general_calc_params['contact_dist_upper'])
-        
+
         # Concatenate chromosomal data into a single array of particle restraints
         # for structure calculation. Add backbone restraints between seq. adjasent particles.
         restraint_indices, restraint_dists = dyn_util.concatenate_restraints(
             restraint_dict, seq_pos_dict, particle_size,
             general_calc_params['backbone_dist_lower'],
             general_calc_params['backbone_dist_upper'])
- 
+
         # Setup starting structure
         if (start_coords is None) or (prev_seq_pos_dict is None):
             coords = get_random_coords(seq_pos_dict, chromosomes, num_models,

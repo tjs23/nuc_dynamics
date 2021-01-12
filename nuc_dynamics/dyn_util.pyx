@@ -26,7 +26,7 @@ cdef getRepulsionList(ndarray[int, ndim=2] rep_list,
     cdef int i, j, k, i1, i2, j1, j2, n2
     cdef int a, b, a0, b0, a1, b1, a2, b2, p0, p, q0, q
     
-    cdef int n    = 0    # Num close pairs
+    cdef int n  = 0    # Num close pairs
     cdef int n1 = 0    # Num primary regions
     cdef int s3 = s2/s1
     cdef int n_rep_found = 0
@@ -647,6 +647,9 @@ cdef double getRestraintForce(ndarray[double, ndim=2] forces,
 def getSupportedPairs(ndarray[int, ndim=2] positions,
                       int threshold=2000000,
                       int posErr=100):
+    """Supported pairs: pairs which has at least one close pairs in 2D plane.
+    posErr < x, y distance < threshold
+    """
                                     
     cdef int i, j, n = len(positions)
     cdef int pA, pB, pC, pD
@@ -915,6 +918,22 @@ def calc_restraints(chromosomes, contact_dict, int particle_size=10000,
     """
     Function to convert single-cell contact data into distance restraints 
     for structure calculations.
+
+    Return
+    ------
+    restraint_dict : Dict[str, [str, ndarray[double, ndim=2]]]
+        In shape: (6, nRestraints), nRestraints = na * nb,
+        na and nb is the bined length of chr1 and chr2.
+        6 rows means:
+            binA ; binB ;
+            Weighting, not currently used ;
+            distance = scale * bin_matrix[i,j] ** exponent, the target distance in paper ;
+            constraint lower bound = distance * lower ;
+            constraint upper bound = distance * upper ;
+
+    pos_dict : Dict[str, ndarray[int, ndim=2]]
+        Dict store the sequence positions of each bins.
+
     """
 
     cdef int i, j, k, a, b, nc, n, na, nb
@@ -929,69 +948,68 @@ def calc_restraints(chromosomes, contact_dict, int particle_size=10000,
     num_contacts_dict = {} # Total num contacts for each chromosomes
     pos_dict = {}          # Start sequence position for each particle in each chromosome
     restraint_dict = {}    # Final restraints for each pair of chromosomes
-    
+
     chromos = set(chromosomes)
     nc = len(chromosomes)
-     
+
     # Num contacts per chromo for mem allocations
     for chrA in contact_dict:
         if chrA not in chromos:
             continue
-        
+
         for chrB in contact_dict[chrA]:
             if chrB not in chromos:
                 continue
-                
+
             contacts = contact_dict[chrA][chrB]
             n = len(contacts[0])
-            
+
             if chrA in num_contacts_dict:
                 num_contacts_dict[chrA] += n
             else:
                 num_contacts_dict[chrA] = n
-            
+
             if chrB in num_contacts_dict:
                 num_contacts_dict[chrB] += n
             else:
                 num_contacts_dict[chrB] = n
-                
+
     chromo_idx = {chromo:i for i, chromo in enumerate(chromosomes)}
     limits = numpy.zeros((nc,2), numpy.int32)
-    
+
     # Get chromosome ranges
     for chrA in contact_dict:
         if chrA not in chromos:
             continue
 
         a = chromo_idx[chrA]
-        
+
         for chrB in contact_dict[chrA]:
             if chrB not in chromos:
                 continue
-                
+
             b = chromo_idx[chrB]
             contacts = contact_dict[chrA][chrB]
             n = len(contacts[0])
-            
+
             for i in range(n):
-                
+
                 if limits[a,0] == 0: # zero is not a valid seq pos anyhow
                     limits[a,0] = contacts[0,i]
                 elif contacts[0,i] < limits[a,0]:
                     limits[a,0] = contacts[0,i]
-                
+
                 if limits[b,0] == 0:
                     limits[b,0] = contacts[1,i]
                 elif contacts[1,i] < limits[b,0]:
                     limits[b,0] = contacts[1,i]
-                
+
                 if contacts[0,i] > limits[a,1]:
                     limits[a,1] = contacts[0,i]
-            
+
                 if contacts[1,i] > limits[b,1]:
                     limits[b,1] = contacts[1,i]
 
-                        
     # Shift extremities of chromosome ranges to lie exactly on particle region edges
     for a in range(nc):
         limits[a,0] = particle_size * (limits[a,0]/particle_size)
@@ -1001,49 +1019,49 @@ def calc_restraints(chromosomes, contact_dict, int particle_size=10000,
     for chromo in chromosomes:
         a = chromo_idx[chromo]
         pos_dict[chromo] = numpy.arange(limits[a,0], limits[a,1] + particle_size, particle_size, numpy.int32)    
-        
+
     # Get restraint indices, do binning of contact observations
     for chrA in contact_dict:
         if chrA not in chromos:
             continue
-            
+
         a = chromo_idx[chrA]
         na = len(pos_dict[chrA])
         seq_pos_a = pos_dict[chrA]
         restraint_dict[chrA] = {}
-        
+
         for chrB in contact_dict[chrA]:
             if chrB not in chromos:
                 continue
-                
+
             b = chromo_idx[chrB]
             nb = len(pos_dict[chrB])
             seq_pos_b = pos_dict[chrB]
-            
+
             contacts = contact_dict[chrA][chrB]
             n = len(contacts[0])
-                
+
             restraints = numpy.empty((6, n), float)
             bin_matrix = numpy.zeros((na, nb), numpy.int32)
 
             for i in range(n):
-                
+
                 # Find bin index for chromo A
                 for j in range(na):
                     if seq_pos_a[j] >= contacts[0,i]:
                         break
-                
+
                 else:
                     continue
-                
+
                 # Find bin index for chromo B
                 for k in range(nb):
                     if seq_pos_b[k] >= contacts[1,i]:
                         break
-                        
+
                 else:
                     continue
-                
+
                 bin_matrix[j,k] += contacts[2,i]            
                 
             #loop over all binned contacts, and calculate the constraint target distance
@@ -1054,20 +1072,20 @@ def calc_restraints(chromosomes, contact_dict, int particle_size=10000,
                     if bin_matrix[i,j] > 0:
                         if bin_matrix[i,j] < min_count:
                             continue
-                            
+
                         dist = scale * bin_matrix[i,j] ** exponent
-                        
+
                         restraints[0,k] = <double>i #binA
                         restraints[1,k] = <double>j #binB
                         restraints[2,k] = 1.0 # Weighting not currently used
                         restraints[3,k] = dist # target value
                         restraints[4,k] = dist * lower # constraint lower bound
                         restraints[5,k] = dist * upper # constraint upper bound
-                        
+
                         k += 1
 
             restraint_dict[chrA][chrB] = restraints[:,:k]
-                
+
     return restraint_dict, pos_dict
 
 
@@ -1077,33 +1095,43 @@ def concatenate_restraints(restraint_dict, pos_dict, particle_size,
     Joins restraints stored in a dict by chromo pairs into long concatenated arrays.
     Indices of restraints relate to concatenated chromo seq pos.
     Add-in all the backbone restraints for sequential particles.
-    """
+
+    Return
+    ------
+    particle_indices : ndarray[int, ndim=2]
+        In shape (num_restraints, 2). The indices(positions in bined matrix)
+        of all restraints. Include backbone restraints(among adjcent particles,
+        like [0, 1], [1, 2]) and contact restraints(particles has contacts).
     
+    distances : ndarray[double, ndim=2]
+        In shape (num_restraints, 2). The target distances of each restraint pairs.
+    """
+
     cdef int i, n, num_restraints, m
     cdef int start_a, start_b
     cdef float bbl = numpy.float32(backbone_lower)
     cdef float bbu = numpy.float32(backbone_upper)
     cdef double dist, size = particle_size
-    
+
     # Get total max number restraints and final restraint index offset for all chromos        
     i = 0
     num_restraints = 0
     chromo_idx_offset = {}
-    
+
     for chr_a in sorted(pos_dict):
         n = len(pos_dict[chr_a])
         chromo_idx_offset[chr_a] = i
         num_restraints += n-1 # One fewer because no link at end of chain
         i += n
-                
+
     for chr_a in restraint_dict:
         for chr_b in restraint_dict[chr_a]:
             num_restraints += restraint_dict[chr_a][chr_b].shape[1]
- 
+
     # Loop allocated arrays
     cdef ndarray[int, ndim=1] positions
     cdef ndarray[double, ndim=2] restraints
-    
+
     # Final arrays which will hold identities of restrained particle pairs
     # and the restraint distances for each
     cdef ndarray[int, ndim=2] particle_indices = numpy.empty((num_restraints, 2), numpy.int32)
@@ -1112,16 +1140,16 @@ def concatenate_restraints(restraint_dict, pos_dict, particle_size,
     # Add backbone path restraints     
     m = 0
     for chr_a in pos_dict:
-        
+
         positions = pos_dict[chr_a]
         n = len(positions)
         start_a = chromo_idx_offset[chr_a]
-        
+
         for i in range(n-1):
             
             # Normally this is 1.0 for regular sized particles
             dist = (positions[i+1]-positions[i])/size
-            
+    
             particle_indices[m,0] = i + start_a
             particle_indices[m,1] = i + start_a + 1
             

@@ -1,3 +1,4 @@
+import os.path as osp
 import numpy as np
 
 from .util.const import N3D, PDB, FORMATS, MAX_CORES
@@ -40,7 +41,7 @@ def calc_genome_structure(input_file_path, out_file_path, general_calc_params, a
         if start_coords:
             chromo = next(iter(start_coords)) # picks out arbitrary chromosome
             num_models = len(start_coords[chromo])
-        
+
     coords_dict = None
     particle_seq_pos = None
     particle_size = None
@@ -54,20 +55,22 @@ def calc_genome_structure(input_file_path, out_file_path, general_calc_params, a
             
             if stage > 0:
                 if particle_size < 0.5e6:
-                        remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
-                                                 particle_size, threshold=6.0)
+                    remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
+                                             particle_size, threshold=6.0)
                 elif particle_size < 0.25e6:
-                        remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
-                                                 particle_size, threshold=5.0)
- 
-            coords_dict, particle_seq_pos = anneal_genome(chromosomes, contact_dict, num_models, particle_size,
-                                                          general_calc_params, anneal_params,
-                                                          prev_seq_pos, start_coords, num_cpu)
- 
+                    remove_violated_contacts(contact_dict, coords_dict, particle_seq_pos,
+                                             particle_size, threshold=5.0)
+
+            coords_dict, particle_seq_pos = anneal_genome(
+                chromosomes, contact_dict, num_models, particle_size,
+                general_calc_params, anneal_params,
+                prev_seq_pos, start_coords, num_cpu)
+
             if save_intermediate and stage < len(particle_sizes)-1:
-                file_path = '%s_%d.%s' % (out_file_path[:-4], stage, out_file_path[-3:]) # DANGER: assumes that suffix is 3 chars
-                export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size)
-                
+                prefix, suffix = osp.splitext(out_file_path)
+                file_path = f"{prefix}_{stage}_{int(particle_size)}{suffix}"
+                export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size, split_chromosome)
+
             # Next stage based on previous stage's 3D coords
             # and their respective seq. positions
             start_coords = coords_dict
@@ -84,7 +87,7 @@ def demo_calc_genome_structure():
     Hi-C contacts stored in an NCC format file (as output from NucProcess)
     """
     
-    ncc_file_path = 'example_chromo_data/Cell_1_contacts.ncc'
+    ncc_file_path = 'example_chromo_data/Cell_1_contacts.ncc.gz'
     save_path = 'example_chromo_data/Cell_1_structure.pdb'
     
     # Number of alternative conformations to generate from repeat calculations

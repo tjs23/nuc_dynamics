@@ -26,7 +26,7 @@ def load_pairs_file(file_path):
     chromosomes : List[str]
     chromo : Dict[str, List[int, int]]
     contact_dict : Dict[str, Dict[str, List[int, int, int, int]]]
-        chr_a -> (chr_b -> (pos1, pos2, num_obs, ambig_group))
+        chr_a -> (chr_b -> List[(pos1, pos2, num_obs, ambig_group)])
     """
     file_obj = open_file(file_path)
 

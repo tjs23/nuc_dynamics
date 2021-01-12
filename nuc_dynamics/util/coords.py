@@ -5,23 +5,25 @@ def get_random_coords(pos_dict, chromosomes, num_models, radius=10.0):
     """
     Get random, uniformly sampled coorinate positions, restricted to
     a sphere of given radius
+
+    Return
+    ------
+    coords : ndarray[double, dim=3]
+        In shape (num_models, num_particles, 3).
     """
     from numpy.random import uniform
 
     num_particles = sum([len(pos_dict[chromo]) for chromo in chromosomes])
     coords = np.empty((num_models, num_particles, 3))
-    r2 = radius*radius
-
     for m in range(num_models):
-        for i in range(num_particles):
-            x = y = z = radius
-
-            while x*x + y*y + z*z >= r2:
-                x = radius * (2*uniform(0,1) - 1)
-                y = radius * (2*uniform(0,1) - 1)
-                z = radius * (2*uniform(0,1) - 1)
-
-            coords[m,i] = [x,y,z]
+        r = uniform(0, radius, size=num_particles)
+        theta = uniform(0, 2*np.pi, size=num_particles)
+        phi = uniform(0, np.pi, size=num_particles)
+        x = r * np.cos(theta) * np.sin(phi)
+        y = r * np.sin(theta) * np.sin(phi)
+        z = r * np.cos(phi)
+        pos = np.c_[x, y, z]
+        coords[m] = pos
 
     return coords
 
