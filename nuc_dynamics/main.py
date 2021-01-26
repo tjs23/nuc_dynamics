@@ -21,7 +21,7 @@ def calc_genome_structure(input_file_path, out_file_path, general_calc_params, a
     from time import time
 
     # Load single-cell Hi-C data from NCC contact file, as output from NucProcess
-    if '.ncc' in os.path.split(input_file_path)[1]:
+    if '.ncc' in osp.split(input_file_path)[1]:
         chromosomes, chromo_limits, contact_dict = load_ncc_file(input_file_path)
     else:
         chromosomes, chromo_limits, contact_dict = load_pairs_file(input_file_path)
@@ -231,7 +231,7 @@ if __name__ == '__main__':
     
     save_path = args['o']
     if save_path is None:
-        save_path = os.path.splitext(input_file_path)[0]
+        save_path = osp.splitext(input_file_path)[0]
         
     particle_sizes = args['s']
     particle_sizes = sorted([x * 1e6 for x in particle_sizes if x > 0], reverse=True)

@@ -2,4 +2,5 @@
 *.so
 build/
 test/
+.ipynb_checkpoints/
 *.pyc

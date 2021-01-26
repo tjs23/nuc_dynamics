@@ -66,7 +66,6 @@ cdef getRepulsionList(ndarray[int, ndim=2] rep_list,
                 
                 n_rep_found += 1
                 
-                
     elif nCoords < s1 * s2: # Single split
         # Calc bounding X regions
 
@@ -80,7 +79,7 @@ cdef getRepulsionList(ndarray[int, ndim=2] rep_list,
             for j in range(i+1, i+s1):
                 if j >= nCoords:
                     break
-            
+
                 if coords[j,0] < regions_1[n1,0,0]:
                     regions_1[n1,0,0] = coords[j,0]
  
@@ -826,8 +825,10 @@ def runDynamics(ndarray[double, ndim=2] coords,
     else:
         s0 = s1
         
-    cdef ndarray[double, ndim=3] regions_1 = numpy.zeros((1+nCoords/s0, 3, 2))  # Large bounding boxes
-    cdef ndarray[double, ndim=4] regions_2 = numpy.zeros((1+nCoords/s0, s2/s1, 3, 2))  # Small bounding boxes
+    # Large bounding boxes, shape: (nBox, xyz, anchor)
+    cdef ndarray[double, ndim=3] regions_1 = numpy.zeros((1+nCoords/s0, 3, 2))
+    # Small bounding boxes, shape: (largeIdx, smallIdx, xyz, anchor)
+    cdef ndarray[double, ndim=4] regions_2 = numpy.zeros((1+nCoords/s0, s2/s1, 3, 2))  
         
     cdef ndarray[int, ndim=1] idx_1 = numpy.zeros(len(regions_1), numpy.int32)
     cdef ndarray[int, ndim=2] idx_2 = numpy.zeros((len(regions_1), s1), numpy.int32)
@@ -853,7 +854,7 @@ def runDynamics(ndarray[double, ndim=2] coords,
                 forces[i,1] = 0.0
                 forces[i,2] = 0.0
              
-            fRep = getRepulsiveForce(rep_list, forces, coords, nRep,    fConstR, radii)
+            fRep = getRepulsiveForce(rep_list, forces, coords, nRep, fConstR, radii)
             fDist = getRestraintForce(forces, coords, restIndices, restLimits, restAmbig, nRest, fConstD)
 
             for i in range(nCoords):

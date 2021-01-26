@@ -98,10 +98,18 @@ $ nuc_dynamics.sh example_chromo_data/Cell_1_contacts.ncc -m 10 -f pdb -o Cell_1
 ## Example Data
 
 Example NCC/PAIRS format contact data to demonstrate NucDynamics is avaiable in the
-example_chromo_data sub-directory, as a .gz compressed file which must be extracted
-before use. 
+[example_chromo_data](./example_chromo_data) sub-directory,
+Both .gz compressed file or raw text file canbe use.
 
-## N3D coordinate format
+## Output file
+
+The output of nuc_dynamics is the 3D coordinate positions of all
+particles(binned chromosomes). Support output formats:
+
++ PDB: Universal molecular structure format, can be visualized with softwares like: [Molstar](https://molstar.org/viewer/), PyMol
++ N3D
+
+### N3D coordinate format
 
 The default N3D output file format for genomic 3D coordinate positions is a
 simple whitespace-separated format consisting of blocks of lines for separate
