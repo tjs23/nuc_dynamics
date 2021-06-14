@@ -4,11 +4,13 @@ import sys
 import numpy as np
 import multiprocessing
 import traceback
+import gzip
 
 QUIET            = False # Global verbosity flag
 LOG_FILE_OBJ     = None # Created if needed
 
 PROG_NAME = 'nuc_dynamics'
+VERSION = '1.3.0'
 DESCRIPTION = 'Single-cell Hi-C genome and chromosome structure calculation module for Nuc3D and NucTools'
 
 N3D = 'n3d'
@@ -16,11 +18,9 @@ PDB = 'pdb'
 FORMATS = [N3D, PDB]
 MAX_CORES = multiprocessing.cpu_count()
 
-DEFAULT_NCC2_ADDED_SIZE_MB = 1
 DEFAULT_STRUCT_AMBIG_SIZE_MB = 0.4
 DEFAULT_REMOVE_MODELS_SIZE_MB = 1
 
-DEFAULT_NCC2_ADDED_SIZE = DEFAULT_NCC2_ADDED_SIZE_MB * int(1e6)
 DEFAULT_STRUCT_AMBIG_SIZE = DEFAULT_STRUCT_AMBIG_SIZE_MB * int(1e6)
 DEFAULT_REMOVE_MODELS_SIZE = DEFAULT_REMOVE_MODELS_SIZE_MB * int(1e6)
 
@@ -129,7 +129,7 @@ def parallel_split_job(target_func, split_data, common_args, num_cpu=MAX_CORES, 
       proc.join()
 
 
-def load_ncc_file(file_path, offset=0):
+def load_ncc_file(file_path, active_only=True, nmax=int(1e6)):
   """Load chromosome and contact data from NCC format file, as output from NucProcess"""
 
   from numpy import array
@@ -144,19 +144,30 @@ def load_ncc_file(file_path, offset=0):
   ambig_group = 0
 
   with f_open(file_path) as file_obj:
-    n = 0
-    for line in file_obj:
+    n_active = 0
+    
+    for i, line in enumerate(file_obj):
       if line.startswith('#'):
         continue
         
-      chr_a, f_start_a, f_end_a, start_a, end_a, strand_a, chr_b, f_start_b, f_end_b, start_b, end_b, strand_b, ambig_group, pair_id, swap_pair = line.split()
+      row = line.split()
+      if not '.' in row[12]:
+        critical('The old version of the NCC format is not supported by the version of NucDynamics. Please use the latest version of NucProcess')
+    
+    ambig_group = 0
+    file_obj.seek(0)   
+    for i, line in enumerate(file_obj):
+      if line.startswith('#'):
+        continue
+        
+      chr_a, f_start_a, f_end_a, start_a, end_a, strand_a, chr_b, f_start_b, f_end_b, start_b, end_b, strand_b, ambig_code, pair_id, swap_pair = line.split()
       
-      if '.' in ambig_group: # Updated NCC format
-        if int(float(ambig_group)) > 0:
-          ambig_group += 1
-      else:
-        ambig_group = int(ambig_group)
-       
+      if int(float(ambig_code)) > 0:
+        ambig_group += 1
+      
+      if active_only and ambig_code.endswith('.0'): # inactive
+        continue
+        
       pos_a = int(f_start_a if strand_a == '+' else f_end_a)
       pos_b = int(f_start_b if strand_b == '+' else f_end_b)
 
@@ -170,12 +181,11 @@ def load_ncc_file(file_path, offset=0):
       if chr_b not in contact_dict[chr_a]:
         contact_dict[chr_a][chr_b] = []
 
-      contact_dict[chr_a][chr_b].append(((pos_a, pos_b), ambig_group+offset, n+offset))
-      n += 1
+      contact_dict[chr_a][chr_b].append(((pos_a, pos_b), ambig_group, i)) # Uses original file line number
+      n_active += 1
 
-  nmax = 1000000
-  if n > nmax:
-    critical('Too many contacts in ncc file (> %d), this code is meant for single cell data' % nmax)
+  if n_active > nmax:
+    critical('Too many contacts in ncc file (> {:,}), this code is meant for single-cell data'.format(nmax))
     
   for chr_a in contact_dict:
     for chr_b in contact_dict[chr_a]:
@@ -188,57 +198,40 @@ def save_ncc_file(file_path_in, name, contact_dict, particle_size=None, offset=0
 
   if particle_size is not None:
     name = '%s_%d' % (name, int(particle_size/1000))
-    
-  if file_path_in.endswith('.gz'):
-    import gzip
+  
+  file_root, file_ext = os.path.splitext(file_path_in)
+  
+  if file_ext.lower() in ('.gz','.gzip'):
+    file_root, file_ext = os.path.splitext(file_root)
     f_open = gzip.open
-    prefix = file_path_in[:-3]
   else:
     f_open = open
-    prefix = file_path_in
 
-  file_path_out ='%s_%s.ncc' % (prefix[:-4], name)
+  file_path_out ='%s_%s.ncc' % (file_root, name)
   
-  numbers = set()
+  active_numbers = set()
   for chr_a in contact_dict:
     for chr_b in contact_dict[chr_a]:
-      numbers |= set(contact_dict[chr_a][chr_b]['number'])
+      active_numbers |= set(contact_dict[chr_a][chr_b]['number'])
       
   with f_open(file_path_in) as file_obj_in:
     with open(file_path_out, 'w') as file_obj_out:
+     
       n = offset
-      for line in file_obj_in:
+      for i, line in enumerate(file_obj_in):
         if line.startswith('#'):
           file_obj_out.write(line)
-        else:
-          if n in numbers:
-            file_obj_out.write(line)
-          n += 1
-  
-  
-def merge_contact_dicts(contact_dict1, contact_dict2):
-  
-  from numpy import array
-
-  merged_contact_dict = {}
-  
-  for contact_dict in (contact_dict1, contact_dict2):
-    for chr_a in contact_dict:
-      if chr_a not in merged_contact_dict:
-        merged_contact_dict[chr_a] = {}
-      for chr_b in contact_dict[chr_a]:
-        if chr_b not in merged_contact_dict[chr_a]:
-          merged_contact_dict[chr_a][chr_b] = []
-
-        x = list(merged_contact_dict[chr_a][chr_b])
-        x.extend(list(contact_dict[chr_a][chr_b]))
-        merged_contact_dict[chr_a][chr_b] = x
         
-  for chr_a in merged_contact_dict:
-    for chr_b in merged_contact_dict[chr_a]:
-      merged_contact_dict[chr_a][chr_b] = array(merged_contact_dict[chr_a][chr_b], dtype=Contact)
-  
-  return merged_contact_dict
+        else:
+          row = line.split()
+          ag = row[12]  
+          
+          activ = '1' if i in active_numbers else '0'
+          row[12] = ag[:-1] + activ            
+          
+          line = ' '.join(row) + '\n'  
+          file_obj_out.write(line)
+
   
 def calc_limits(contact_dict):
   chromo_limits = {}
@@ -424,7 +417,7 @@ def remove_ambiguous_contacts(contact_dict):
   for (chromoA, chromoB), contacts in flatten_dict(contact_dict).items():
     contacts = [c for c in contacts if c['ambiguity'] in ambiguity_set]
     if contacts:
-      new_contacts[chromoA][chromoB] = np.array(contacts, dtype= Contact)
+      new_contacts[chromoA][chromoB] = np.array(contacts, dtype=Contact)
   
   return dict(new_contacts)
   
@@ -675,7 +668,7 @@ def resolve_3d_ambiguous(contact_dict, seq_pos_dict, coords_dict, percentile_thr
   for (chromoA, chromoB), contacts in flatten_dict(contact_dict).items():
     contacts = [c for c in contacts if (c['ambiguity'], chromoA, c['pos'][0], chromoB, c['pos'][1]) not in remove]
     if contacts:
-      new_contact_dict[chromoA][chromoB] = np.array(contacts, dtype= Contact)
+      new_contact_dict[chromoA][chromoB] = np.array(contacts, dtype=Contact)
   
   return dict(new_contact_dict)
 
@@ -684,25 +677,42 @@ def between(x, a, b):
   return (a < x) & (x < b)
 
 
-def remove_isolated_contacts(contact_dict, threshold_cis=int(2e6), threshold_trans=int(10e6), pos_error=100, ignore=()):
+def initial_clean_contacts(contact_dict, threshold_cis=int(2e6), threshold_trans=int(10e6), pos_error=100, ignore=()):
   """
-  Select only contacts which are within a given sequence separation of another
-  contact, for the same chromosome pair
+  Select only unambigous contacts that are within a given sequence separation of another
+  contact, for the same chromosome pair.
   """
+  
+  info('Cleaning initial contact list')
+  
   from numpy import array, zeros, eye
   from collections import defaultdict
   new_contacts = defaultdict(dict)
-
+  ag_size = defaultdict(int)
+  
+  contact_pos = defaultdict(list)
+  
+  for chr_pair, contacts in flatten_dict(contact_dict).items():
+    for ag in contacts['ambiguity']:
+      ag_size[ag] += 1
+        
   for (chromoA, chromoB), contacts in flatten_dict(contact_dict).items():
+    # Select only unambiguous
+    unambig = np.array([ag_size[ag] == 1 for ag in contacts['ambiguity']])
+    contacts = contacts[unambig]
+    
     if chromoA == chromoB:
       threshold = threshold_cis
     else:
       threshold = threshold_trans
+      
+    
     # positions is N x 2 matrix, where there are N contacts (and the 2 is because of pos_a, pos_b)
     positions = contacts['pos'].astype('int32')
     if chromoA in ignore or chromoB in ignore:
-        new_contacts[chromoA][chromoB] = contacts
-        continue
+      new_contacts[chromoA][chromoB] = contacts
+      continue
+      
     if len(positions) == 0: # Sometimes empty e.g. for MT, Y chromos
       continue
     # positions[:, 0] and positions[:, 1] have shape N
@@ -721,10 +731,12 @@ def remove_isolated_contacts(contact_dict, threshold_cis=int(2e6), threshold_tra
     supported |= (between(abs(pos_a - pos_b.T), pos_error, threshold) &
                   between(abs(pos_b - pos_a.T), pos_error, threshold) &
                   nondiagonal).any(axis=0)
-
+    
     if not supported.any():
-        continue
+      continue
+    
     new_contacts[chromoA][chromoB] = contacts[supported]
+    
   return dict(new_contacts)
 
 
@@ -1518,14 +1530,12 @@ def contact_count(contact_dict):
   
 def particle_size_file_path(file_path, particle_size):
   
-  n = file_path.rfind('.')
+  file_root, file_ext = os.path.splitext(file_path)  
   size = int(particle_size/1000)
-  if n == len(file_path)-3: # DANGER: assumes that suffix is 3 chars and do not have .xyz without also .n3d/.pdb
-    file_path = '%s_%d.%s' % (file_path[:-4], size, file_path[-3:])
-  else:
-    file_path = '%s_%d' % (file_path, size)
-    
+  file_path = '%s_%d%s' % (file_root, size, file_ext)
+   
   return file_path
+
 
 def remove_violated_threshold(particle_size, bead_size):
   
@@ -1537,73 +1547,47 @@ def remove_violated_threshold(particle_size, bead_size):
   
   return threshold
   
-def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_calc_params, anneal_params,
+def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, anneal_params,
                           particle_sizes, num_models=5, isolation_threshold_cis=int(2e6),
                           isolation_threshold_trans=int(10e6), out_format=N3D, num_cpu=MAX_CORES,
                           start_coords_path=None, save_intermediate=False, save_intermediate_ncc=False,
-                          have_diploid=False, ncc2_added_at_size=DEFAULT_NCC2_ADDED_SIZE,
-                          struct_ambig_size=DEFAULT_STRUCT_AMBIG_SIZE, remove_models_size=DEFAULT_REMOVE_MODELS_SIZE):
-                          #remove_ambig_contacts=False, remove_homo_pairs=False,
-                          #resolve_homo_ambig=False, resolve_3d_ambig=False):
+                          have_diploid=False, struct_ambig_size=DEFAULT_STRUCT_AMBIG_SIZE,
+                          remove_models_size=DEFAULT_REMOVE_MODELS_SIZE):
 
   from time import time
   
   req_num_models = num_models
   
   # Load single-cell Hi-C data from NCC contact file, as output from NucProcess
+  using_inactive = False
   contact_dict = load_ncc_file(ncc_file_path)
   info('Total number of contacts = %d' % contact_count(contact_dict))
-    
-  if ncc2_file_path:
-    ambig_offset = 0
-    for chr_a in contact_dict:
-      for chr_b in contact_dict[chr_a]:
-        ambig_offset = max(ambig_offset, max([contact[1] for contact in contact_dict[chr_a][chr_b]]),
-                                         max([contact[2] for contact in contact_dict[chr_a][chr_b]]))
-    t = np.power(10, np.floor(np.log10(ambig_offset+1)))
-    ambig_offset = int(t * np.ceil(ambig_offset / t))
-    contact2_dict = load_ncc_file(ncc2_file_path, offset=ambig_offset)
-    info('Total number of secondary contacts = %d, offset = %d' % (contact_count(contact2_dict), ambig_offset))
-  
-  if have_diploid:
-    contact_dict = resolve_homolog_ambiguous(contact_dict)
-    info('Total number of contacts after resolving homologous ambiguity = %d' % contact_count(contact_dict))
-    if save_intermediate_ncc:
-      save_ncc_file(ncc_file_path, 'resolve_homo', contact_dict, particle_sizes[0])
-      
-    if ncc2_file_path:
-      contact2_dict = resolve_homolog_ambiguous(contact2_dict)
-      info('Total number of secondary contacts after resolving homologous ambiguity = %d' % contact_count(contact2_dict))
-      if save_intermediate_ncc:
-        save_ncc_file(ncc2_file_path, 'resolve_homo', contact2_dict, particle_sizes[0], ambig_offset)
-  
 
-  # Initial coords will be random
-  start_coords = None
-
-  # Record particle positions from previous stages
-  # so that coordinates can be interpolated to higher resolution
-  prev_seq_pos = None
+  #if have_diploid:
+  #  contact_dict = resolve_homolog_ambiguous(contact_dict)
+  #  info('Total number of contacts after resolving homologous ambiguity = %d' % contact_count(contact_dict))
+  #  if save_intermediate_ncc:
+  #    save_ncc_file(ncc_file_path, 'resolve_homo', contact_dict, particle_sizes[0])
 
   if start_coords_path:
     prev_seq_pos, start_coords = load_n3d_coords(start_coords_path)
     if start_coords:
       chromo = next(iter(start_coords)) # picks out arbitrary chromosome
       num_models = len(start_coords[chromo])
+  else:
+    # Record particle positions from previous stages
+    # so that coordinates can be interpolated to higher resolution
+    prev_seq_pos = None
+    start_coords = None  # Initial coords will be random
     
   for stage, particle_size in enumerate(particle_sizes):
-
     info("Running structure calculation stage %d (%d kb)" % (stage+1, particle_size//1000))
- 
-    stage_contact_dict = contact_dict
-    if ncc2_file_path and particle_size <= ncc2_added_at_size:
-      stage_contact_dict = merge_contact_dicts(stage_contact_dict, contact2_dict)
-      info('Total number of contacts after merging = %d' % contact_count(stage_contact_dict))
     
-    if save_intermediate_ncc:
-      save_ncc_file(ncc_file_path, 'remove_isol', stage_contact_dict, particle_size)
-      if ncc2_file_path:
-        save_ncc_file(ncc2_file_path, 'remove_isol', stage_contact_dict, particle_size, ambig_offset)
+    if particle_size <= struct_ambig_size and not using_inactive:
+      contact_dict = load_ncc_file(ncc_file_path, active_only=False)
+      using_inactive = True
+      
+    stage_contact_dict = dict(contact_dict) # Each stage reconsiders all contacts
 
     anneal_params['temp_steps'] = anneal_params['temp_steps_by_stage'][stage]
     anneal_params['dynamics_steps'] = anneal_params['dynamics_steps_by_stage'][stage]
@@ -1612,44 +1596,48 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
     # once we have a reasonable resolution structure
     bead_size = determine_bead_size(particle_size)
     
-    if start_coords is not None:
+    if start_coords is None:
+      # Only use unambiguous contacts which are supported by others nearby in sequence, in the initial instance
+      stage_contact_dict = initial_clean_contacts(stage_contact_dict, threshold_cis=isolation_threshold_cis,
+                                                    threshold_trans=isolation_threshold_trans)
       
+      if save_intermediate_ncc:
+        save_ncc_file(ncc_file_path, 'remove_isol', stage_contact_dict, particle_size)
+      
+      if particle_size > remove_models_size:
+        num_models = 2 * req_num_models
+      else:
+        num_models = req_num_models
+      
+    else:
       if particle_size <= remove_models_size and num_models > req_num_models:
         start_coords = remove_models(start_coords, prev_seq_pos, req_num_models)
         chromo = next(iter(start_coords)) # picks out arbitrary chromosome
         num_models = len(start_coords[chromo])
         info('Removed %d models. Calculating %d' % (num_models-req_num_models, req_num_models))
         
-      if (have_diploid or ncc2_file_path) and particle_size <= struct_ambig_size:
+      if particle_size <= struct_ambig_size:
         stage_contact_dict = resolve_3d_ambiguous(stage_contact_dict, prev_seq_pos, start_coords)
-        info('Total number of contacts after removing structural homologous ambiguity = %d' % contact_count(stage_contact_dict))
+        info('Total number of contacts after resolving ambiguity with structure = %d' % contact_count(stage_contact_dict))
+        
         if save_intermediate_ncc:
           save_ncc_file(ncc_file_path, 'resolve_3d', stage_contact_dict, particle_size)
-          if ncc2_file_path:
-            save_ncc_file(ncc2_file_path, 'resolve_3d', stage_contact_dict, particle_size, ambig_offset)
+          
       else:
-        # Only use contacts which are supported by others nearby in sequence, in the initial instance
-        stage_contact_dict = remove_isolated_contacts(stage_contact_dict, threshold_cis=isolation_threshold_cis,
-                                            threshold_trans=isolation_threshold_trans)
-    else:
-      # Only use contacts which are supported by others nearby in sequence, in the initial instance
-      stage_contact_dict = remove_isolated_contacts(stage_contact_dict, threshold_cis=isolation_threshold_cis,
-                                            threshold_trans=isolation_threshold_trans)
-      
-      if particle_size > remove_models_size:
-        num_models = 2 * req_num_models
-      else:
-        num_models = req_num_models
+        # Only use supported, unambiguous contacts
+        stage_contact_dict = initial_clean_contacts(stage_contact_dict, threshold_cis=isolation_threshold_cis,
+                                                    threshold_trans=isolation_threshold_trans)
+        if save_intermediate_ncc:
+           save_ncc_file(ncc_file_path, 'remove_isol', stage_contact_dict, particle_size)
             
     threshold = remove_violated_threshold(particle_size, bead_size)
+    
     if threshold:
       stage_contact_dict = remove_violated_contacts(stage_contact_dict, start_coords, prev_seq_pos,
                                                     threshold=threshold)
       info('Total number of contacts after removing violated contacts = %d' % contact_count(stage_contact_dict))
       if save_intermediate_ncc:
         save_ncc_file(ncc_file_path, 'remove_viol', stage_contact_dict, particle_size)
-        if ncc2_file_path:
-          save_ncc_file(ncc2_file_path, 'remove_viol', stage_contact_dict, particle_size, ambig_offset)
 
     coords_dict, particle_seq_pos = anneal_genome(stage_contact_dict, num_models, particle_size,
                                                   general_calc_params, anneal_params,
@@ -1668,13 +1656,12 @@ def calc_genome_structure(ncc_file_path, ncc2_file_path, out_file_path, general_
   file_path = particle_size_file_path(out_file_path, particle_size)
   export_coords(out_format, file_path, coords_dict, particle_seq_pos, particle_size, num_models)
 
-  if (have_diploid or ncc2_file_path) and particle_size <= struct_ambig_size:
+  if particle_size <= struct_ambig_size:
     contact_dict = resolve_3d_ambiguous(contact_dict, particle_seq_pos, coords_dict)
-    info('Final total number of contacts after removing structural homologous ambiguity = %d' % contact_count(contact_dict))
+    info('Final total number of contacts after removing structural ambiguity = %d' % contact_count(contact_dict))
+    
     if save_intermediate_ncc:
       save_ncc_file(ncc_file_path, 'final', contact_dict, particle_size)
-      if ncc2_file_path:
-        save_ncc_file(ncc2_file_path, 'final', contact_dict, particle_size, ambig_offset)
 
 
 def test_imports(gui=False):
@@ -1757,7 +1744,7 @@ def demo_calc_genome_structure():
   
   calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
                         particle_sizes, num_models, isolation_threshold_cis,
-                        isolation_threadhold_trans, out_format='pdb')
+                        isolation_threshold_trans, out_format='pdb')
 
 test_imports()
 
@@ -1776,9 +1763,6 @@ if __name__ == '__main__':
 
   arg_parse.add_argument('ncc_path', nargs=1, metavar='NCC_FILE',
                          help='Input NCC format file containing single-cell Hi-C contact data, e.g. use the demo data at example_chromo_data/Cell_1_contacts.ncc')
-
-  arg_parse.add_argument('-ncc2_path', metavar='NCC_FILE',
-                         help='Second input NCC format file containing single-cell positional ambiguous Hi-C contact data')
 
   arg_parse.add_argument('-o', metavar='OUT_FILE',
                          help='Optional name of output file for 3D coordinates in N3D or PDB format (see -f option). If not set this will be auto-generated from the input file name')
@@ -1809,12 +1793,9 @@ if __name__ == '__main__':
 
   arg_parse.add_argument('-diploid', default=False, action='store_true',
                          help='The data is (hybrid) diploid')
-                         
-  arg_parse.add_argument('-ncc2_added_at_size', default=DEFAULT_NCC2_ADDED_SIZE_MB, metavar='Mb_SIZE', type=float,
-                         help='The particle size (Mb) at or below which the constraints from the second ncc file are introduced: Default %.1f' % DEFAULT_NCC2_ADDED_SIZE_MB)
 
   arg_parse.add_argument('-struct_ambig_size', default=DEFAULT_STRUCT_AMBIG_SIZE_MB, metavar='Mb_SIZE', type=float,
-                         help='The particle size (Mb) at or below which the ambiguous constraints are filtered (for diploid data) using the structure: Default %.1f' % DEFAULT_STRUCT_AMBIG_SIZE_MB)
+                         help='The particle size (Mb) at or below which the ambiguous constraints (inc. for diploid data) are considered and filtered using the structure: Default %.1f' % DEFAULT_STRUCT_AMBIG_SIZE_MB)
 
   arg_parse.add_argument('-remove_models_size', default=DEFAULT_REMOVE_MODELS_SIZE_MB, metavar='Mb_SIZE', type=float,
                          help='The particle size (Mb) at or below which half the models are removed (based on RMSD): Default %.1f' % DEFAULT_REMOVE_MODELS_SIZE_MB)
@@ -1873,7 +1854,6 @@ if __name__ == '__main__':
   args = vars(arg_parse.parse_args())
   
   ncc_file_path = args['ncc_path'][0]
-  ncc2_file_path = args['ncc2_path']
   
   save_path = args['o']
   if save_path is None:
@@ -1913,12 +1893,8 @@ if __name__ == '__main__':
   save_intermediate_ncc = args['save_intermediate_ncc']
   start_coords_path = args['start_coords_path']
   have_diploid = args['diploid']
-  ncc2_added_at_size = args['ncc2_added_at_size']
   struct_ambig_size = args['struct_ambig_size']
   remove_models_size = args['remove_models_size']
-  
-  if ncc2_file_path and remove_models_size and remove_models_size < ncc2_added_at_size:
-    critical('remove_models_size must be >= ncc2_added_at_size')
   
   if out_format not in FORMATS:
     critical('Output file format must be one of: %s' % ', '.join(FORMATS))
@@ -1995,21 +1971,20 @@ if __name__ == '__main__':
   
   isolation_threshold_cis *= int(1e6)
   isolation_threshold_trans *= int(1e6)
-  ncc2_added_at_size *= int(1e6)
   struct_ambig_size *= int(1e6)
   remove_models_size *= int(1e6)
   
-  calc_genome_structure(ncc_file_path, ncc2_file_path, save_path, general_calc_params, anneal_params,
+  calc_genome_structure(ncc_file_path, save_path, general_calc_params, anneal_params,
                         particle_sizes, num_models, isolation_threshold_cis, isolation_threshold_trans,
                         out_format, num_cpu, start_coords_path, save_intermediate, save_intermediate_ncc,
-                        have_diploid, ncc2_added_at_size, struct_ambig_size, remove_models_size)
-                        #remove_ambig_contacts, remove_homo_pairs, resolve_homo_ambig, resolve_3d_ambig)
+                        have_diploid, struct_ambig_size, remove_models_size)
 
   if LOG_FILE_OBJ:
     LOG_FILE_OBJ.close()
+
+
 # TO DO
 # -----
 # Allow chromosomes to be specified
-# Allow starting structures to be input
 
 
