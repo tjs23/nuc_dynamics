@@ -1293,7 +1293,13 @@ def svd_rotate(coords_a, coords_b, weights=None):
     coords_bt = coords_b.transpose() * weights
 
   mat = np.dot(coords_bt, coords_a)
-  rot_mat1, _scales, rot_mat2 = np.linalg.svd(mat)
+  
+  try:
+    rot_mat1, _scales, rot_mat2 = np.linalg.svd(mat)
+  
+  except np.linalg.LinAlgError as err:
+    return coords_b
+    
   sign = np.linalg.det(rot_mat1) * np.linalg.det(rot_mat2)
 
   if sign < 0:
@@ -1632,7 +1638,7 @@ def calc_genome_structure(ncc_file_path, out_file_path, general_calc_params, ann
             
     threshold = remove_violated_threshold(particle_size, bead_size)
     
-    if threshold:
+    if threshold and start_coords:
       stage_contact_dict = remove_violated_contacts(stage_contact_dict, start_coords, prev_seq_pos,
                                                     threshold=threshold)
       info('Total number of contacts after removing violated contacts = %d' % contact_count(stage_contact_dict))

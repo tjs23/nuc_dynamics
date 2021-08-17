@@ -1202,7 +1202,6 @@ def anneal_genome(contact_dict, num_models, particle_size,
   # (these need not be fixed for all stages, but are for simplicity)    
   dyn_steps = anneal_params['dynamics_steps']
   time_step = anneal_params['time_step']
-  
      
   # Update coordinates in the annealing schedule which is applied to each model in parallel
   common_args = [anneal_schedule, masses, radii, restraints, rep_dists,
