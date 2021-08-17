@@ -3,6 +3,7 @@ import os
 import sys
 import numpy as np
 import multiprocessing
+import subprocess
 import traceback
 import gzip
 
@@ -13,6 +14,7 @@ PROG_NAME = 'nuc_dynamics'
 VERSION = '1.3.0'
 DESCRIPTION = 'Single-cell Hi-C genome and chromosome structure calculation module for Nuc3D and NucTools'
 
+FILE_BUFFER_SIZE = 2**16
 N3D = 'n3d'
 PDB = 'pdb'
 FORMATS = [N3D, PDB]
@@ -68,6 +70,39 @@ def _parallel_func_wrapper(queue, target_func, proc_data, common_args):
     
     elif isinstance(result, Exception):
       raise(result)
+
+
+def open_file(file_path, mode=None, buffer_size=FILE_BUFFER_SIZE, gzip_exts=('.gz','.gzip'), partial=False):
+  """
+  GZIP agnostic file opening
+  """
+  import io
+  
+  if os.path.splitext(file_path)[1].lower() in gzip_exts:
+    if mode and 'w' in mode:
+      file_obj = io.BufferedWriter(gzip.open(file_path, mode), buffer_size)
+      
+    else:
+      if partial:
+        file_obj = io.BufferedReader(gzip.open(file_path, mode or 'rb'), buffer_size)
+        
+      else:
+        try:
+          file_obj = subprocess.Popen(['zcat', file_path], stdout=subprocess.PIPE).stdout
+        except OSError:
+          file_obj = io.BufferedReader(gzip.open(file_path, mode or 'rb'), buffer_size)
+    
+    if sys.version_info.major > 2:
+      file_obj = io.TextIOWrapper(file_obj, encoding="utf-8")
+ 
+  else:
+    if sys.version_info.major > 2:
+      file_obj = open(file_path, mode or 'rU', buffer_size, encoding='utf-8')
+      
+    else:
+      file_obj = open(file_path, mode or 'rU', buffer_size)
+  
+  return file_obj
 
 
 def parallel_split_job(target_func, split_data, common_args, num_cpu=MAX_CORES, collect_output=True):
@@ -134,16 +169,10 @@ def load_ncc_file(file_path, active_only=True, nmax=int(1e6)):
 
   from numpy import array
 
-  if file_path.endswith('.gz'):
-    import gzip
-    f_open = gzip.open
-  else:
-    f_open = open
-
   contact_dict = {}
   ambig_group = 0
 
-  with f_open(file_path) as file_obj:
+  with open_file(file_path) as file_obj:
     n_active = 0
     
     for i, line in enumerate(file_obj):
@@ -203,10 +232,7 @@ def save_ncc_file(file_path_in, name, contact_dict, particle_size=None, offset=0
   
   if file_ext.lower() in ('.gz','.gzip'):
     file_root, file_ext = os.path.splitext(file_root)
-    f_open = gzip.open
-  else:
-    f_open = open
-
+ 
   file_path_out ='%s_%s.ncc' % (file_root, name)
   
   active_numbers = set()
@@ -214,8 +240,8 @@ def save_ncc_file(file_path_in, name, contact_dict, particle_size=None, offset=0
     for chr_b in contact_dict[chr_a]:
       active_numbers |= set(contact_dict[chr_a][chr_b]['number'])
       
-  with f_open(file_path_in) as file_obj_in:
-    with open(file_path_out, 'w') as file_obj_out:
+  with open_file(file_path_in) as file_obj_in:
+    with open_file(file_path_out, 'w') as file_obj_out:
      
       n = offset
       for i, line in enumerate(file_obj_in):
