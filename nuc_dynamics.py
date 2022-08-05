@@ -1872,13 +1872,13 @@ if __name__ == '__main__':
                          type=int, help='Number of temperature steps in annealing protocol between start and end temperature. Default: 500')
 
   arg_parse.add_argument('-temps_by_stage', default=[], metavar='NUM_STEPS', nargs='+',
-                         type=int, help='Number of temperature steps (specified by stage) in annealing protocol between start and end temperature. If this is specified then -temps argument ignored.')
+                         type=int, help='Number of temperature steps (specified by hierarchical stage; see -s) in annealing protocol between start and end temperature. If this is specified then -temps argument ignored.')
 
   arg_parse.add_argument('-dyns', default=100, metavar='NUM_STEPS',
                          type=int, help='Number of particle dynamics steps to apply at each temperature in the annealing protocol. Default: 100')
 
   arg_parse.add_argument('-dyns_by_stage', default=[], metavar='NUM_STEPS', nargs='+',
-                         type=int, help='Number of particle dynamics steps to apply (specified by stage) at each temperature in the annealing protocol. If this is specified then -dyns argument ignored.')
+                         type=int, help='Number of particle dynamics steps to apply (specified by hierarchical stage; see -s) at each temperature in the annealing protocol. If this is specified then -dyns argument ignored.')
 
   arg_parse.add_argument('-time_step', default=0.001, metavar='TIME_DELTA',
                          type=float, help='Simulation time step between re-calculation of particle velocities. Default: 0.001')
