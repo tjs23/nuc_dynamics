@@ -97,10 +97,10 @@ def open_file(file_path, mode=None, buffer_size=FILE_BUFFER_SIZE, gzip_exts=('.g
  
   else:
     if sys.version_info.major > 2:
-      file_obj = open(file_path, mode or 'rU', buffer_size, encoding='utf-8')
+      file_obj = open(file_path, mode or 'r', buffer_size, encoding='utf-8')
       
     else:
-      file_obj = open(file_path, mode or 'rU', buffer_size)
+      file_obj = open(file_path, mode or 'r', buffer_size)
   
   return file_obj
 
@@ -1235,7 +1235,7 @@ def open_file(file_path, mode=None, gzip_exts=('.gz','.gzip')):
   if os.path.splitext(file_path)[1].lower() in gzip_exts:
     file_obj = gzip.open(file_path, mode or 'rt')
   else:
-    file_obj = open(file_path, mode or 'rU', IO_BUFFER)
+    file_obj = open(file_path, mode or 'r', IO_BUFFER)
  
   return file_obj
 
