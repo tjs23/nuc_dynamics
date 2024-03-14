@@ -31,7 +31,7 @@ cdef getRepulsionList(ndarray[long,   ndim=2] rep_list,
   
   cdef int n  = 0  # Num close pairs
   cdef int n1 = 0  # Num primary regions
-  cdef int s3 = s2/s1
+  cdef int s3 = int(s2/s1) # # Converting to integer, which truncates decimals
   cdef int n_rep_found = 0
   
   cdef double dx, dy, dz, d2
