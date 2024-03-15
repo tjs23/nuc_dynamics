@@ -904,15 +904,17 @@ def anneal_model(model_data, anneal_schedule, masses, radii, restraints, rep_dis
     
     # Update coordinates for this temp
     
-    #try:
-    dt, nrep_max = dyn_util.run_dynamics(model_coords, masses, radii, rep_dists,
+    try:
+      dt, nrep_max = dyn_util.run_dynamics(model_coords, masses, radii, rep_dists,
                                          restraints['indices'], restraints['dists'],
                                          restraints['weight'], ambiguity,
                                          temp, time_step, dyn_steps, repulse, dist,
                                          bead_size, nrep_max,
                                          print_interval=print_interval)
     
-    #except Exception as err:
+    except Exception as err:
+      print(f"Error while running dynamics: {err}")
+      break 
     #  return err
     
     nrep_max = np.int32(nrep_max * 1.2)
