@@ -61,6 +61,7 @@ These modules are available in bundled Python packages like Anaconda or Canopy,
 in most Linux distributions' package managers or can be installed on most
 UNIX-like systems using pip:
 
+```bash
   pip install numpy
   pip install cython
 
@@ -77,6 +78,7 @@ Cython. A re-compilation may be forced by deleting the .so and .c files that
 result from the compilation. The Cython code may also be compiled indepenently
 using the setup_cython.py script as follows:
 
+```bash
   python setup_cython.py build_ext --inplace
 
 
@@ -84,13 +86,13 @@ Running NucDynamics
 -------------------
 
 Typical use, generating 10 conformational models in PDB format:
-
+```bash
   nuc_dynamics example_chromo_data/Cell_1_contacts.ncc -m 10 -f pdb
 
 
 Specifying the particle sizes (8 Mb, 2 Mb, 1 Mb, 500 kb) and an output file
 name:
-
+```bash
   nuc_dynamics example_chromo_data/Cell_1_contacts.ncc -m 10 -f pdb -o Cell_1.pdb -s 8 2 1 0.5
 
 
