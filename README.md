@@ -82,16 +82,15 @@ chromosomes (or other named sequence segments). Each block consists of a header 
 positions) and the number of alternative coordinate models. The subsequent particle data lines for the chromosome contain the basebair sequence position
 followed by cartesian (X, Y, Z) coordinates for each alternative model.
 
-i.e. each block is arranged like:
-
+- i.e. each block is arranged like:
+~~~
   chr_name      num_coords    num_models
   seq_pos_a     xa1     ya1     za1     xa2     ya2     za2     xa3     ya3     za3      ...
   seq_pos_b     xb1     yb1     zb1     xb2     yb2     zb2     xb3     yb3     zb3      ...
   ...
-
-For example the lines for two chromosomes, each with 5 positions/coordinates and
-1 model could be:
-
+~~~
+- For example the lines for two chromosomes, each with 5 positions/coordinates and 1 model could be:
+~~~
   chr7    5       1
   3000000 9.58282628      7.00573100      -1.83845778
   3100000 9.59673638      5.97364070      -2.01971472
@@ -104,7 +103,7 @@ For example the lines for two chromosomes, each with 5 positions/coordinates and
   3300000 -2.86136185     5.20402428      -2.68921585
   3400000 -3.37860658     4.53744574      -2.09833147
   3500000 -4.05993187     3.72324210      -2.17562361
- 
+~~~ 
 
 Command line options for nuc_dynamics
 -------------------------------------
