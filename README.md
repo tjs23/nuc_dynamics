@@ -64,7 +64,7 @@ UNIX-like systems using pip:
 ```bash
   pip install numpy
   pip install cython
-
+```
 
 Installation
 ------------
@@ -80,7 +80,7 @@ using the setup_cython.py script as follows:
 
 ```bash
   python setup_cython.py build_ext --inplace
-
+```
 
 Running NucDynamics
 -------------------
@@ -88,13 +88,14 @@ Running NucDynamics
 Typical use, generating 10 conformational models in PDB format:
 ```bash
   nuc_dynamics example_chromo_data/Cell_1_contacts.ncc -m 10 -f pdb
-
+```
 
 Specifying the particle sizes (8 Mb, 2 Mb, 1 Mb, 500 kb) and an output file
 name:
+
 ```bash
   nuc_dynamics example_chromo_data/Cell_1_contacts.ncc -m 10 -f pdb -o Cell_1.pdb -s 8 2 1 0.5
-
+```
 
 Example Data
 ------------
@@ -208,13 +209,13 @@ Jupyter Script
 In addition to the command-line tool a Jupyter notebook for Python 3 is provided
 to illustrate how nuc_dynamics can be imported used within Python scripts.
 Jupyter can be installed using:
-
+~~~
   pip install jupyter
-
+~~~
 And from the directory containing nuc_dynamics the notebook can be started with:
-
+~~~
   jupyter notebook
-
+~~~
 This notebook is has only been tested under Python version 3 and to run requires
 the Cython code to be compiled (see Installation section above), to generate the
 dyn_util.so file, and for all the modules to either be in the same directory or
