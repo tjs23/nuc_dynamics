@@ -97,10 +97,10 @@ def open_file(file_path, mode=None, buffer_size=FILE_BUFFER_SIZE, gzip_exts=('.g
  
   else:
     if sys.version_info.major > 2:
-      file_obj = open(file_path, mode or 'rU', buffer_size, encoding='utf-8')
+      file_obj = open(file_path, mode or 'r', buffer_size, encoding='utf-8')
       
     else:
-      file_obj = open(file_path, mode or 'rU', buffer_size)
+      file_obj = open(file_path, mode or 'r', buffer_size)
   
   return file_obj
 
@@ -904,15 +904,17 @@ def anneal_model(model_data, anneal_schedule, masses, radii, restraints, rep_dis
     
     # Update coordinates for this temp
     
-    #try:
-    dt, nrep_max = dyn_util.run_dynamics(model_coords, masses, radii, rep_dists,
+    try:
+      dt, nrep_max = dyn_util.run_dynamics(model_coords, masses, radii, rep_dists,
                                          restraints['indices'], restraints['dists'],
                                          restraints['weight'], ambiguity,
                                          temp, time_step, dyn_steps, repulse, dist,
                                          bead_size, nrep_max,
                                          print_interval=print_interval)
     
-    #except Exception as err:
+    except Exception as err:
+      print(f"Error while running dynamics: {err}")
+      break 
     #  return err
     
     nrep_max = np.int32(nrep_max * 1.2)
@@ -1235,7 +1237,7 @@ def open_file(file_path, mode=None, gzip_exts=('.gz','.gzip')):
   if os.path.splitext(file_path)[1].lower() in gzip_exts:
     file_obj = gzip.open(file_path, mode or 'rt')
   else:
-    file_obj = open(file_path, mode or 'rU', IO_BUFFER)
+    file_obj = open(file_path, mode or 'r', IO_BUFFER)
  
   return file_obj
 
